@@ -60,6 +60,7 @@ fi
 
 # 2. Create Target Directories
 mkdir -p "${APP_DIR}/styles"
+mkdir -p "${APP_DIR}/plugins"
 mkdir -p "${BIN_DIR}"
 mkdir -p "${DESKTOP_DIR}"
 
@@ -72,6 +73,10 @@ if [ -f "${SCRIPT_DIR}/src/reaper_notes/libwhisper_easy.so" ]; then
 fi
 if [ -d "${SCRIPT_DIR}/src/reaper_notes/styles" ]; then
     cp "${SCRIPT_DIR}/src/reaper_notes/styles/"*.xml "${APP_DIR}/styles/" 2>/dev/null || true
+fi
+if [ -d "${SCRIPT_DIR}/src/reaper_notes/plugins" ]; then
+    cp "${SCRIPT_DIR}/src/reaper_notes/plugins/"*.py "${APP_DIR}/plugins/" 2>/dev/null || true
+    chmod 755 "${APP_DIR}/plugins"/*.py 2>/dev/null || true
 fi
 
 chmod 755 "${APP_DIR}"/*.py

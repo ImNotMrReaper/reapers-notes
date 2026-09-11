@@ -30,6 +30,8 @@ from autocomplete import AutocompleteEngine
 from voice import VoiceDictationManager
 from ai_assistant import dispatch_antigravity_prompt
 from settings import load_settings, save_settings, get_setting, set_setting
+from obsidian import discover_vaults, get_default_vault, push_to_obsidian, create_obsidian_template
+from plugins.manager import PluginManager, USER_PLUGINS_DIR
 
 VAULT_DIR = Path.home() / "Documents" / "Valut"
 DEFAULT_NOTES_DIR = VAULT_DIR if VAULT_DIR.exists() else (Path.home() / "Documents" / "Notes")
@@ -738,6 +740,7 @@ class NotesWindow(Adw.ApplicationWindow):
 
         self.engine = AutocompleteEngine()
         self.voice_mgr = VoiceDictationManager()
+        self.plugin_manager = PluginManager(self)
 
         self._build_ui()
         self._connect_signals()
@@ -789,7 +792,7 @@ class NotesWindow(Adw.ApplicationWindow):
 
         self.header.pack_start(left_box)
 
-        # Right Header Actions: Find, Voice, AI, Lock, Menu
+        # Right Header Actions: Find, Voice, AI, Obsidian, Lock, Menu
         right_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
 
         self.btn_find = Gtk.Button.new_from_icon_name("system-search-symbolic")
@@ -805,10 +808,16 @@ class NotesWindow(Adw.ApplicationWindow):
         right_box.append(self.btn_voice)
 
         self.btn_ai = Gtk.Button.new_from_icon_name("system-run-symbolic")
-        self.btn_ai.set_tooltip_text("Antigravity AI Prompt (Ctrl+Alt+A)")
+        self.btn_ai.set_tooltip_text("AI Assistant Prompt (Ctrl+Alt+A)")
         self.btn_ai.add_css_class("header-action-btn")
         self.btn_ai.connect("clicked", lambda _: self.trigger_ai_prompt())
         right_box.append(self.btn_ai)
+
+        self.btn_obsidian = Gtk.Button.new_from_icon_name("document-send-symbolic")
+        self.btn_obsidian.set_tooltip_text("Push Note to Obsidian Vault (Ctrl+Alt+O)")
+        self.btn_obsidian.add_css_class("header-action-btn")
+        self.btn_obsidian.connect("clicked", lambda _: self.push_current_note_to_obsidian())
+        right_box.append(self.btn_obsidian)
 
         self.btn_lock = Gtk.Button.new_from_icon_name("changes-prevent-symbolic")
         self.btn_lock.set_tooltip_text("Lock & Encrypt Note (AES-256-GCM)")
@@ -826,6 +835,16 @@ class NotesWindow(Adw.ApplicationWindow):
         menu.append("New Window", "win.new_window")
         menu.append("Save As...", "win.save_as")
         menu.append("Find and Replace...", "win.find_replace")
+
+        # Obsidian Vault Integration
+        obsidian_section = Gio.Menu()
+        obsidian_section.append("Push to Obsidian Vault (Ctrl+Alt+O)", "win.obsidian_push")
+        obsidian_section.append("New Obsidian Note (Ctrl+Shift+O)", "win.obsidian_new")
+        menu.append_section("Obsidian", obsidian_section)
+
+        # Plugins Submenu
+        plugins_submenu = self.plugin_manager.build_plugins_menu()
+        menu.append_submenu("Plugins", plugins_submenu)
 
         view_section = Gio.Menu()
         view_section.append("Zoom In", "win.zoom_in")
@@ -912,6 +931,10 @@ class NotesWindow(Adw.ApplicationWindow):
             ("theme_oled", lambda *_: self.apply_theme_mode("oled")),
             ("theme_dark", lambda *_: self.apply_theme_mode("dark")),
             ("theme_light", lambda *_: self.apply_theme_mode("light")),
+            ("obsidian_push", lambda *_: self.push_current_note_to_obsidian()),
+            ("obsidian_new", lambda *_: self.create_new_obsidian_note()),
+            ("show_plugins_manager", lambda *_: self.plugin_manager.show_manager_dialog()),
+            ("open_plugins_folder", lambda *_: self.open_plugins_folder()),
         ]
         for name, callback in actions:
             action = Gio.SimpleAction.new(name, None)
@@ -1112,9 +1135,19 @@ class NotesWindow(Adw.ApplicationWindow):
             self.toggle_voice_dictation()
             return True
 
-        # Hotkey: Ctrl+Alt+A -> Antigravity AI (Safe Interactive Prompt)
+        # Hotkey: Ctrl+Alt+A -> AI Assistant Prompt
         if ctrl and alt and keyval in (Gdk.KEY_a, Gdk.KEY_A):
             self.trigger_ai_prompt()
+            return True
+
+        # Hotkey: Ctrl+Alt+O -> Push Note to Obsidian Vault
+        if ctrl and alt and keyval in (Gdk.KEY_o, Gdk.KEY_O):
+            self.push_current_note_to_obsidian()
+            return True
+
+        # Hotkey: Ctrl+Shift+O -> New Obsidian Note
+        if ctrl and shift and keyval in (Gdk.KEY_o, Gdk.KEY_O):
+            self.create_new_obsidian_note()
             return True
 
         # Hotkey: Ctrl+Shift+S -> Save As
@@ -1440,6 +1473,13 @@ class NotesWindow(Adw.ApplicationWindow):
     # Antigravity AI Task Dispatch (Safe Interactive Dialog)
     # -------------------------------------------------------------------------
     def trigger_ai_prompt(self):
+        ai_plug = self.plugin_manager.get_plugin("ai_assistant")
+        if ai_plug and ai_plug.enabled:
+            ai_plug.prompt_dialog(self)
+        else:
+            self._legacy_ai_prompt()
+
+    def _legacy_ai_prompt(self):
         page = self.get_current_page()
         if not page:
             return
@@ -1453,8 +1493,8 @@ class NotesWindow(Adw.ApplicationWindow):
         # Present an interactive modal dialog so AI is never triggered accidentally
         dialog = Adw.MessageDialog(
             transient_for=self,
-            heading="🤖 Antigravity AI Assistant",
-            body="Enter your prompt or instruction for Antigravity AI:"
+            heading="🤖 AI Assistant Prompt",
+            body="Enter your prompt or instruction for AI completion:"
         )
 
         entry = Gtk.Entry()
@@ -1480,7 +1520,7 @@ class NotesWindow(Adw.ApplicationWindow):
                     self.set_status_message("⚠️ Prompt cannot be empty.")
                     return
                 self.btn_ai.add_css_class("ai-btn-thinking")
-                self.set_status_message(f"🤖 Antigravity AI thinking: \"{prompt_text[:35]}...\"")
+                self.set_status_message(f"🤖 AI thinking: \"{prompt_text[:35]}...\"")
                 dispatch_antigravity_prompt(prompt_text, self._on_ai_completed)
             else:
                 self.set_status_message("AI prompt canceled.")
@@ -1500,9 +1540,56 @@ class NotesWindow(Adw.ApplicationWindow):
             it = page.buffer.get_iter_at_mark(page.buffer.get_insert())
             insert_text = f"\n\n{response}\n"
             page.buffer.insert(it, insert_text)
-            self.set_status_message("✅ Antigravity AI response inserted!")
+            self.set_status_message("✅ AI response inserted!")
         else:
-            self.set_status_message("⚠️ Antigravity returned empty response.")
+            self.set_status_message("⚠️ AI returned empty response.")
+
+    def push_current_note_to_obsidian(self):
+        """Pushes active document to the default Obsidian vault."""
+        obsidian_plug = self.plugin_manager.get_plugin("obsidian_sync")
+        if obsidian_plug and obsidian_plug.enabled:
+            obsidian_plug.push_note(self)
+        else:
+            page = self.get_current_page()
+            if not page:
+                self.set_status_message("⚠️ No active note to push.")
+                return
+            content = page.get_full_text()
+            if not content.strip():
+                self.set_status_message("⚠️ Note is empty.")
+                return
+            title = page.title if page.title and page.title != "Untitled Note" else ""
+            default_vault = get_default_vault()
+            if default_vault:
+                vault_name, vault_path = default_vault
+                success, res = push_to_obsidian(content, title, vault_path)
+                if success:
+                    self.set_status_message(f"🟣 Pushed to Obsidian vault '{vault_name}': {Path(res).name}")
+                else:
+                    self.set_status_message(f"❌ Failed to push note: {res}")
+            else:
+                self.set_status_message("⚠️ No Obsidian vault detected on system.")
+
+    def create_new_obsidian_note(self):
+        """Creates a new note tab pre-formatted for Obsidian."""
+        obsidian_plug = self.plugin_manager.get_plugin("obsidian_sync")
+        if obsidian_plug and obsidian_plug.enabled:
+            obsidian_plug.new_obsidian_note(self)
+        else:
+            page = self.open_new_tab()
+            template = create_obsidian_template("New Obsidian Note")
+            page.buffer.set_text(template)
+            page.set_language_by_id("markdown")
+            self.set_status_message("🟣 Created new Obsidian note.")
+
+    def open_plugins_folder(self):
+        """Opens user plugins folder in file manager."""
+        USER_PLUGINS_DIR.mkdir(parents=True, exist_ok=True)
+        try:
+            Gio.AppInfo.launch_default_for_uri(USER_PLUGINS_DIR.as_uri(), None)
+        except Exception:
+            import subprocess
+            subprocess.Popen(["xdg-open", str(USER_PLUGINS_DIR)])
 
     def show_shortcuts_dialog(self):
         dialog = Adw.MessageDialog(
@@ -1515,11 +1602,13 @@ class NotesWindow(Adw.ApplicationWindow):
                 "• Ctrl+O : Open Document\n"
                 "• Ctrl+S : Save Document\n"
                 "• Ctrl+Shift+S : Save As...\n"
+                "• Ctrl+Alt+O : Push Note to Obsidian Vault\n"
+                "• Ctrl+Shift+O : New Obsidian Note\n"
                 "• Ctrl+F : Find in Document\n"
                 "• Ctrl+H : Find and Replace\n"
                 "• Tab / Right : Accept Ghost-Text Suggestion\n"
                 "• Ctrl+Alt+V / F9 : Real-Time Voice Dictation (Esc to cancel)\n"
-                "• Ctrl+Alt+A : Antigravity AI Assistant (Interactive Prompt)\n"
+                "• Ctrl+Alt+A : AI Assistant Prompt\n"
                 "• Ctrl++ / Ctrl+- : Zoom In / Out\n"
                 "• Ctrl+0 : Reset Zoom"
             )

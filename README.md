@@ -52,7 +52,24 @@
 - Runs 100% on your local CPU (sub-70ms inference on modern Intel/AMD processors). Zero telemetry or network requests.
 - **Escape Key Abort:** Hit `Escape` anytime during recording to immediately drop uncommitted speech audio and keep your note clean.
 
-### 4. Adaptive Appearance & OLED Pitch Black
+### 4. Obsidian Vault Integration
+- **Direct Vault Discovery:** Automatically detects configured Obsidian vaults from `~/.config/obsidian/obsidian.json` and standard directories (`~/Documents/Valut`, `~/Documents/Obsidian Vault`).
+- **Push to Obsidian (`Ctrl+Alt+O`):** Save your active document straight into your Obsidian vault with a single keypress or HeaderBar click (`document-send-symbolic`). Dispatches native `obsidian://open` URIs so your note is instantly indexed.
+- **New Obsidian Note (`Ctrl+Shift+O`):** Spawns a new tab pre-populated with standard Obsidian YAML frontmatter (`title`, `date`, `tags: [notes]`) and Markdown syntax.
+
+### 5. Modular Plugin System & Universal AI Backend
+- **Plugin Architecture:** Decoupled extensions engine (`src/reaper_notes/plugins/`) featuring:
+  - `base.py`: Clean lifecycle interface (`on_load`, `on_unload`, `get_menu_items`).
+  - `manager.py`: Dynamic runtime discovery across built-in plugins and user scripts (`~/.config/reaper-notes/plugins/`).
+  - `example_plugin.py`: Reference implementation providing live document word/character counters, ISO timestamp insertion, and text transformations.
+- **AI-Agnostic Engine (`ai_plugin.py`):** External users on GitHub are never locked into a single AI runtime. Supports:
+  - **Antigravity CLI** (`agy`)
+  - **Anthropic Claude CLI** (`claude`)
+  - **Ollama Local Daemon** (offline private LLMs at `http://localhost:11434`)
+  - **OpenAI-Compatible API** endpoints
+  - Auto-detection selects the best available local or system AI tool automatically.
+
+### 6. Adaptive Appearance & OLED Pitch Black
 - **System Default:** Automatically tracks your GNOME desktop light/dark theme and system accent colors.
 - **Pure OLED Pitch Black (Reaper):** Pure `#000000` canvas with Ubuntu Purple (`#7764D8`) accents for deep battery savings and zero backlight bleed on OLED displays.
 - **Dark Mode & Light Mode:** Force standard dark or light schemes regardless of system settings.
@@ -106,9 +123,11 @@ sudo ./install.sh
 | `Ctrl + Shift + S` | Save Document As... |
 | `Ctrl + F` | Find in Document |
 | `Ctrl + H` | Find and Replace |
+| `Ctrl + Alt + O` | Push Note to Obsidian Vault |
+| `Ctrl + Shift + O` | Create New Obsidian Note |
 | `Ctrl + Alt + V` / `F9` | Start / Stop Real-Time Voice Dictation |
 | `Escape` | Cancel Voice Dictation / Close Search Bar |
-| `Ctrl + Alt + A` | Antigravity AI Prompt Dialog |
+| `Ctrl + Alt + A` | AI Assistant Prompt Dialog |
 | `Tab` / `Right Arrow` | Accept Ghost-Text Autocomplete Suggestion |
 | `Ctrl + +` / `Ctrl + =` | Zoom In |
 | `Ctrl + -` | Zoom Out |
@@ -125,7 +144,7 @@ cd reapers-notes
 ./build_deb.sh
 ```
 
-This generates `reapers-notes_1.0.0_amd64.deb` in the repository root.
+This generates `reapers-notes_1.1.0_amd64.deb` in the repository root.
 
 ---
 

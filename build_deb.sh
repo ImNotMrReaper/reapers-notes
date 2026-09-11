@@ -7,7 +7,7 @@ set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BUILD_DIR="${SCRIPT_DIR}/build/deb"
-VERSION="1.0.0"
+VERSION="1.1.0"
 PKG_NAME="reapers-notes"
 ARCH="$(dpkg --print-architecture 2>/dev/null || echo "amd64")"
 DEB_FILE="${PKG_NAME}_${VERSION}_${ARCH}.deb"
@@ -20,6 +20,7 @@ rm -rf "${BUILD_DIR}"
 mkdir -p "${BUILD_DIR}/DEBIAN"
 mkdir -p "${BUILD_DIR}/usr/bin"
 mkdir -p "${BUILD_DIR}/usr/share/${PKG_NAME}/styles"
+mkdir -p "${BUILD_DIR}/usr/share/${PKG_NAME}/plugins"
 mkdir -p "${BUILD_DIR}/usr/share/applications"
 
 # 1. Copy Application Core Files
@@ -30,6 +31,10 @@ if [ -f "${SCRIPT_DIR}/src/reaper_notes/libwhisper_easy.so" ]; then
 fi
 if [ -d "${SCRIPT_DIR}/src/reaper_notes/styles" ]; then
     cp "${SCRIPT_DIR}/src/reaper_notes/styles/"*.xml "${BUILD_DIR}/usr/share/${PKG_NAME}/styles/" 2>/dev/null || true
+fi
+if [ -d "${SCRIPT_DIR}/src/reaper_notes/plugins" ]; then
+    cp "${SCRIPT_DIR}/src/reaper_notes/plugins/"*.py "${BUILD_DIR}/usr/share/${PKG_NAME}/plugins/" 2>/dev/null || true
+    chmod 755 "${BUILD_DIR}/usr/share/${PKG_NAME}/plugins"/*.py 2>/dev/null || true
 fi
 
 chmod 755 "${BUILD_DIR}/usr/share/${PKG_NAME}"/*.py
@@ -56,7 +61,7 @@ done
 # 5. Create Debian Control File
 cat << 'EOF_CONTROL' > "${BUILD_DIR}/DEBIAN/control"
 Package: reapers-notes
-Version: 1.0.0
+Version: 1.1.0
 Section: editors
 Priority: optional
 Architecture: amd64
