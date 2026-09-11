@@ -7,7 +7,7 @@ set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BUILD_DIR="${SCRIPT_DIR}/build/deb"
-VERSION="1.1.0"
+VERSION="1.2.0"
 PKG_NAME="reapers-notes"
 ARCH="$(dpkg --print-architecture 2>/dev/null || echo "amd64")"
 DEB_FILE="${PKG_NAME}_${VERSION}_${ARCH}.deb"
@@ -23,7 +23,7 @@ mkdir -p "${BUILD_DIR}/usr/share/${PKG_NAME}/styles"
 mkdir -p "${BUILD_DIR}/usr/share/${PKG_NAME}/plugins"
 mkdir -p "${BUILD_DIR}/usr/share/applications"
 
-# 1. Copy Application Core Files
+# 1. Copy source code files
 cp "${SCRIPT_DIR}/src/reaper_notes/"*.py "${BUILD_DIR}/usr/share/${PKG_NAME}/"
 cp "${SCRIPT_DIR}/src/reaper_notes/"*.css "${BUILD_DIR}/usr/share/${PKG_NAME}/"
 if [ -f "${SCRIPT_DIR}/src/reaper_notes/libwhisper_easy.so" ]; then
@@ -36,20 +36,19 @@ if [ -d "${SCRIPT_DIR}/src/reaper_notes/plugins" ]; then
     cp "${SCRIPT_DIR}/src/reaper_notes/plugins/"*.py "${BUILD_DIR}/usr/share/${PKG_NAME}/plugins/" 2>/dev/null || true
     chmod 755 "${BUILD_DIR}/usr/share/${PKG_NAME}/plugins"/*.py 2>/dev/null || true
 fi
-
 chmod 755 "${BUILD_DIR}/usr/share/${PKG_NAME}"/*.py
 chmod 644 "${BUILD_DIR}/usr/share/${PKG_NAME}"/*.css 2>/dev/null || true
 
-# 2. Copy Executable Launcher
+# 2. Copy wrapper executable
 cp "${SCRIPT_DIR}/bin/reaper-notes" "${BUILD_DIR}/usr/bin/reaper-notes"
 chmod 755 "${BUILD_DIR}/usr/bin/reaper-notes"
 
-# 3. Copy Desktop Launcher
-cp "${SCRIPT_DIR}/assets/com.reaper.Notes.desktop" "${BUILD_DIR}/usr/share/applications/com.reaper.Notes.desktop"
+# 3. Copy desktop entry
+cp "${SCRIPT_DIR}/assets/com.reaper.Notes.desktop" "${BUILD_DIR}/usr/share/applications/"
 chmod 644 "${BUILD_DIR}/usr/share/applications/com.reaper.Notes.desktop"
 
-# 4. Copy Application Icons across all standard resolutions
-for size in 16x16 24x24 32x32 48x48 64x64 128x128 256x256 512x512; do
+# 4. Copy icons
+for size in 16x16 32x32 48x48 64x64 128x128 256x256; do
     if [ -f "${SCRIPT_DIR}/assets/icons/hicolor/${size}/apps/com.reaper.Notes.png" ]; then
         mkdir -p "${BUILD_DIR}/usr/share/icons/hicolor/${size}/apps"
         cp "${SCRIPT_DIR}/assets/icons/hicolor/${size}/apps/com.reaper.Notes.png" \
@@ -61,7 +60,7 @@ done
 # 5. Create Debian Control File
 cat << 'EOF_CONTROL' > "${BUILD_DIR}/DEBIAN/control"
 Package: reapers-notes
-Version: 1.1.0
+Version: 1.2.0
 Section: editors
 Priority: optional
 Architecture: amd64

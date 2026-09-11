@@ -840,6 +840,8 @@ class NotesWindow(Adw.ApplicationWindow):
         obsidian_section = Gio.Menu()
         obsidian_section.append("Push to Obsidian Vault (Ctrl+Alt+O)", "win.obsidian_push")
         obsidian_section.append("New Obsidian Note (Ctrl+Shift+O)", "win.obsidian_new")
+        obsidian_section.append("Manage / Switch Vaults...", "win.obsidian_manage_vaults")
+        obsidian_section.append("Choose Vault in File Manager...", "win.obsidian_choose_folder")
         menu.append_section("Obsidian", obsidian_section)
 
         # Plugins Submenu
@@ -933,6 +935,8 @@ class NotesWindow(Adw.ApplicationWindow):
             ("theme_light", lambda *_: self.apply_theme_mode("light")),
             ("obsidian_push", lambda *_: self.push_current_note_to_obsidian()),
             ("obsidian_new", lambda *_: self.create_new_obsidian_note()),
+            ("obsidian_manage_vaults", lambda *_: self.show_obsidian_vaults()),
+            ("obsidian_choose_folder", lambda *_: self.choose_obsidian_folder()),
             ("show_plugins_manager", lambda *_: self.plugin_manager.show_manager_dialog()),
             ("open_plugins_folder", lambda *_: self.open_plugins_folder()),
         ]
@@ -1581,6 +1585,18 @@ class NotesWindow(Adw.ApplicationWindow):
             page.buffer.set_text(template)
             page.set_language_by_id("markdown")
             self.set_status_message("🟣 Created new Obsidian note.")
+
+    def show_obsidian_vaults(self):
+        """Displays the Obsidian Vault Manager dialog."""
+        obsidian_plug = self.plugin_manager.get_plugin("obsidian_sync")
+        if obsidian_plug:
+            obsidian_plug.show_vault_manager_dialog(self)
+
+    def choose_obsidian_folder(self):
+        """Opens native file manager to pick an Obsidian vault folder."""
+        obsidian_plug = self.plugin_manager.get_plugin("obsidian_sync")
+        if obsidian_plug:
+            obsidian_plug.select_vault_from_file_manager(self)
 
     def open_plugins_folder(self):
         """Opens user plugins folder in file manager."""

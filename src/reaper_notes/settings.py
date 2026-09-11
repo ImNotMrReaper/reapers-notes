@@ -14,7 +14,9 @@ DEFAULT_SETTINGS = {
     "line_numbers": True,
     "word_wrap": True,
     "right_margin": False,
-    "default_language": "markdown"
+    "default_language": "markdown",
+    "active_vault_path": None,
+    "custom_vaults": []
 }
 
 

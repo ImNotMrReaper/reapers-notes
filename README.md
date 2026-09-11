@@ -144,7 +144,7 @@ cd reapers-notes
 ./build_deb.sh
 ```
 
-This generates `reapers-notes_1.1.0_amd64.deb` in the repository root.
+This generates `reapers-notes_1.2.0_amd64.deb` in the repository root.
 
 ---
 
