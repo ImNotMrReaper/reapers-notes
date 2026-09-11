@@ -21,7 +21,10 @@ from .base import NotesPlugin
 from .example_plugin import ExampleToolsPlugin
 from .ai_plugin import AIAssistantPlugin
 from .obsidian_plugin import ObsidianPlugin
-from ..settings import get_setting, set_setting
+try:
+    from ..settings import get_setting, set_setting
+except (ImportError, ValueError):
+    from settings import get_setting, set_setting
 
 USER_PLUGINS_DIR = Path.home() / ".config" / "reaper-notes" / "plugins"
 

@@ -19,7 +19,10 @@ gi.require_version("Adw", "1")
 from gi.repository import Gtk, Adw, GLib
 
 from .base import NotesPlugin
-from ..settings import get_setting, set_setting
+try:
+    from ..settings import get_setting, set_setting
+except (ImportError, ValueError):
+    from settings import get_setting, set_setting
 
 
 class AIAssistantPlugin(NotesPlugin):

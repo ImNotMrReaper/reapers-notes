@@ -11,7 +11,10 @@ gi.require_version("Adw", "1")
 from gi.repository import Gtk, Adw
 
 from .base import NotesPlugin
-from ..obsidian import discover_vaults, get_default_vault, push_to_obsidian, create_obsidian_template
+try:
+    from ..obsidian import discover_vaults, get_default_vault, push_to_obsidian, create_obsidian_template
+except (ImportError, ValueError):
+    from obsidian import discover_vaults, get_default_vault, push_to_obsidian, create_obsidian_template
 
 
 class ObsidianPlugin(NotesPlugin):
