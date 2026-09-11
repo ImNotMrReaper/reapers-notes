@@ -32,17 +32,29 @@ else
     echo ">>> Target Scope: Local User (${INSTALL_PREFIX})"
 fi
 
-# 1. Install System Dependencies if apt is available
+# 1. Install System Dependencies if apt is available and packages missing
 if command -v apt-get >/dev/null 2>&1; then
-    echo ">>> Checking and installing system dependencies (APT)..."
-    DEPS="python3 python3-gi python3-gi-cairo gir1.2-gtk-4.0 gir1.2-adw-1 gir1.2-gtksource-5 python3-cryptography libpipewire-0.3-0 zenity"
-    if [ "$IS_SYSTEM" -eq 1 ]; then
-        apt-get update -qq || true
-        apt-get install -y -qq $DEPS || true
-    elif command -v sudo >/dev/null 2>&1; then
-        echo ">>> Requesting sudo access to verify system GTK4 / Libadwaita libraries..."
-        sudo apt-get update -qq || true
-        sudo apt-get install -y -qq $DEPS || true
+    MISSING_DEPS=0
+    for pkg in python3-gi python3-gi-cairo gir1.2-gtk-4.0 gir1.2-adw-1 gir1.2-gtksource-5 python3-cryptography; do
+        if ! dpkg -s "$pkg" >/dev/null 2>&1; then
+            MISSING_DEPS=1
+            break
+        fi
+    done
+
+    if [ "$MISSING_DEPS" -eq 1 ]; then
+        echo ">>> Installing missing system dependencies (APT)..."
+        DEPS="python3 python3-gi python3-gi-cairo gir1.2-gtk-4.0 gir1.2-adw-1 gir1.2-gtksource-5 python3-cryptography libpipewire-0.3-0 zenity"
+        if [ "$IS_SYSTEM" -eq 1 ]; then
+            apt-get update -qq || true
+            apt-get install -y -qq $DEPS || true
+        elif command -v sudo >/dev/null 2>&1; then
+            echo ">>> Requesting sudo access to install system GTK4 / Libadwaita libraries..."
+            sudo apt-get update -qq || true
+            sudo apt-get install -y -qq $DEPS || true
+        fi
+    else
+        echo ">>> All required GTK4, Libadwaita, and system dependencies are already installed."
     fi
 fi
 
