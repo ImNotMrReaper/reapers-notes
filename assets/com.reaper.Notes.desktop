@@ -1,0 +1,24 @@
+[Desktop Entry]
+Name=Notes
+GenericName=Text Editor & Notes
+Comment=Modern GTK4 / Libadwaita text editor with multi-document tabs, syntax highlighting, offline Whisper dictation, and biometric encryption
+Exec=reaper-notes %F
+Icon=com.reaper.Notes
+Terminal=false
+Type=Application
+Categories=GNOME;GTK;Utility;TextEditor;Development;
+MimeType=text/plain;text/markdown;text/x-c;text/x-c++;text/x-csrc;text/x-chdr;text/x-python;text/x-shellscript;text/x-rust;text/x-go;text/x-javascript;text/x-typescript;application/json;application/xml;text/html;text/css;text/yaml;text/x-makefile;application/x-locked-note;
+StartupWMClass=com.reaper.Notes
+StartupNotify=true
+Keywords=text;editor;notes;pad;markdown;code;whisper;voice;biometrics;locked;encrypted;
+Actions=new-note;new-locked-note;
+
+[Desktop Action new-note]
+Name=New Note
+Exec=reaper-notes --new
+Icon=document-new-symbolic
+
+[Desktop Action new-locked-note]
+Name=New Locked Note
+Exec=reaper-notes --new-locked
+Icon=channel-secure-symbolic

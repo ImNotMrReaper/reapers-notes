@@ -1,0 +1,220 @@
+/* Reaper's Notes: Adaptive System Theme & OLED Pitch-Black Hybrid CSS */
+
+/* ------------------------------------------------------------------------- */
+/* Core Functional Widgets (Active across all themes)                        */
+/* ------------------------------------------------------------------------- */
+
+/* Header Action Buttons */
+button.header-action-btn {
+    border-radius: 8px;
+    padding: 6px 10px;
+    margin: 0 2px;
+    transition: all 150ms ease-in-out;
+}
+
+/* Microphone Recording Pulse */
+button.voice-btn-recording {
+    background-color: rgba(220, 38, 38, 0.25);
+    color: #ff5555;
+    border: 1px solid #ff4444;
+}
+
+/* AI Thinking State */
+button.ai-btn-thinking {
+    background-color: rgba(119, 100, 216, 0.25);
+    color: #a99de6;
+    border: 1px solid #7764D8;
+}
+
+/* Active Locked Note Button */
+button.locked-btn-active {
+    background-color: rgba(119, 100, 216, 0.25);
+    color: #a99de6;
+    border: 1px solid #7764D8;
+}
+
+/* Locked Note Tab Badge */
+.locked-badge {
+    background-color: rgba(119, 100, 216, 0.15);
+    color: #a99de6;
+    border: 1px solid rgba(119, 100, 216, 0.4);
+    border-radius: 6px;
+    font-size: 11px;
+    font-weight: 600;
+    padding: 2px 8px;
+}
+
+/* Bottom Status Bar */
+box.notes-statusbar {
+    padding: 4px 14px;
+    font-size: 11px;
+    border-top: 1px solid rgba(128, 128, 128, 0.15);
+}
+
+.status-tag {
+    color: #7764D8;
+    font-weight: 600;
+}
+
+button.language-selector-btn {
+    background: transparent;
+    border: none;
+    padding: 2px 8px;
+    border-radius: 6px;
+    transition: background 150ms ease;
+}
+
+button.language-selector-btn:hover {
+    background: rgba(128, 128, 128, 0.15);
+}
+
+.dim-label {
+    opacity: 0.65;
+    font-size: 11px;
+    margin: 0 4px;
+}
+
+/* In-Editor Search & Replace Bar */
+box.search-bar {
+    padding: 6px 14px;
+    border-bottom: 1px solid rgba(128, 128, 128, 0.15);
+}
+
+box.search-bar entry {
+    border-radius: 6px;
+    padding: 4px 8px;
+}
+
+box.search-bar button {
+    border-radius: 6px;
+    padding: 4px 8px;
+    font-size: 11px;
+}
+
+/* ------------------------------------------------------------------------- */
+/* Pure OLED Pitch-Black (#000000) Theme Overrides (.oled-mode)              */
+/* ------------------------------------------------------------------------- */
+
+window.notes-window.oled-mode {
+    background-color: #000000;
+    color: #e0e0e0;
+}
+
+window.notes-window.oled-mode headerbar.notes-header {
+    background-color: #0a0a0a;
+    border-bottom: 1px solid #181818;
+    color: #ffffff;
+}
+
+window.notes-window.oled-mode headerbar.notes-header .title {
+    font-weight: bold;
+    color: #ffffff;
+}
+
+window.notes-window.oled-mode headerbar.notes-header .subtitle {
+    color: #a99de6;
+    font-size: 11px;
+}
+
+window.notes-window.oled-mode textview.notes-editor,
+window.notes-window.oled-mode gtksourceview.notes-editor {
+    background-color: #000000;
+    color: #f8f8f2;
+    font-family: 'Monospace', monospace;
+    font-size: 13pt;
+    caret-color: #7764D8;
+}
+
+window.notes-window.oled-mode textview.notes-editor text,
+window.notes-window.oled-mode gtksourceview.notes-editor text {
+    background-color: #000000;
+    color: #f8f8f2;
+}
+
+window.notes-window.oled-mode textview.notes-editor text selection,
+window.notes-window.oled-mode gtksourceview.notes-editor text selection {
+    background-color: #443270;
+    color: #ffffff;
+}
+
+window.notes-window.oled-mode scrolledwindow.notes-scroll {
+    background-color: #000000;
+    border: none;
+}
+
+window.notes-window.oled-mode button.header-action-btn:hover {
+    background-color: #1e1e1e;
+    color: #ffffff;
+}
+
+window.notes-window.oled-mode button.header-action-btn:active {
+    background-color: #2a2a2a;
+    color: #7764D8;
+}
+
+window.notes-window.oled-mode box.notes-statusbar {
+    background-color: #080808;
+    border-top: 1px solid #141414;
+    color: #888888;
+}
+
+window.notes-window.oled-mode box.search-bar {
+    background-color: #0d0c14;
+    border-bottom: 1px solid #242036;
+}
+
+window.notes-window.oled-mode box.search-bar entry {
+    background-color: #171524;
+    color: #f8f8f2;
+    border: 1px solid #3c3260;
+}
+
+window.notes-window.oled-mode box.search-bar entry:focus {
+    border-color: #7764D8;
+    outline: none;
+    box-shadow: 0 0 0 1px #7764D8;
+}
+
+window.notes-window.oled-mode box.search-bar button {
+    background-color: #171524;
+    color: #c8c0e8;
+    border: 1px solid #3c3260;
+}
+
+window.notes-window.oled-mode box.search-bar button:hover {
+    background-color: #26223d;
+    color: #ffffff;
+    border-color: #7764D8;
+}
+
+window.notes-window.oled-mode box.search-bar button:checked {
+    background-color: #443270;
+    color: #ffffff;
+    border-color: #a99de6;
+}
+
+window.notes-window.oled-mode tabbar,
+window.notes-window.oled-mode .tab-bar {
+    background-color: #060606;
+    border-bottom: 1px solid #181818;
+}
+
+window.notes-window.oled-mode tabbar tab,
+window.notes-window.oled-mode .tab-bar tab {
+    background-color: #0c0c0c;
+    color: #8e8e99;
+    border-right: 1px solid #181818;
+}
+
+window.notes-window.oled-mode tabbar tab:hover,
+window.notes-window.oled-mode .tab-bar tab:hover {
+    background-color: #141414;
+    color: #ffffff;
+}
+
+window.notes-window.oled-mode tabbar tab:checked,
+window.notes-window.oled-mode .tab-bar tab:checked {
+    background-color: #000000;
+    color: #ffffff;
+    border-top: 2px solid #7764D8;
+}

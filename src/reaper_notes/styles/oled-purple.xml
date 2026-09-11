@@ -1,0 +1,134 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<style-scheme id="oled-purple" _name="OLED Purple" version="1.0">
+  <author>Antigravity</author>
+  <_description>Pure OLED pitch-black style scheme with Ubuntu Purple accents and high-contrast Markdown styling</_description>
+
+  <metadata>
+    <property name="variant">dark</property>
+    <property name="light-variant">oled-purple</property>
+    <property name="window_bg_color">#000000</property>
+    <property name="window_fg_color">#ffffff</property>
+    <property name="headerbar_bg_color">#000000</property>
+    <property name="headerbar_fg_color">#ffffff</property>
+    <property name="popover_bg_color">#000000</property>
+    <property name="popover_fg_color">#ffffff</property>
+    <property name="dialog_bg_color">#000000</property>
+    <property name="dialog_fg_color">#ffffff</property>
+    <property name="view_bg_color">#000000</property>
+    <property name="view_fg_color">#ffffff</property>
+    <property name="card_bg_color">#000000</property>
+    <property name="card_fg_color">#ffffff</property>
+    <property name="accent_color">#7764D8</property>
+    <property name="accent_bg_color">#7764D8</property>
+    <property name="accent_fg_color">#ffffff</property>
+  </metadata>
+
+  <!-- Color Palette -->
+  <color name="pure_black"        value="#000000"/>
+  <color name="oled_elevated"     value="#0a0a0f"/>
+  <color name="oled_highlight"    value="#161224"/>
+  <color name="oled_border"       value="#272138"/>
+  <color name="foreground_pure"   value="#f8f8f2"/>
+  <color name="foreground_dim"    value="#a09cb0"/>
+  <color name="foreground_faint"  value="#5c5770"/>
+
+  <color name="ubuntu_purple"     value="#7764D8"/>
+  <color name="ubuntu_purple_lt"  value="#9d8af5"/>
+  <color name="ubuntu_purple_dk"  value="#493896"/>
+  <color name="selection_bg"      value="#443270"/>
+
+  <color name="dracula_cyan"      value="#8be9fd"/>
+  <color name="dracula_green"     value="#50fa7b"/>
+  <color name="dracula_orange"    value="#ffb86c"/>
+  <color name="dracula_pink"      value="#ff79c6"/>
+  <color name="dracula_yellow"    value="#f1fa8c"/>
+  <color name="dracula_red"       value="#ff5555"/>
+  <color name="dracula_comment"   value="#6272a4"/>
+  <color name="dracula_purple"    value="#bd93f9"/>
+
+  <!-- Core Editor Canvas -->
+  <style name="text"                  background="pure_black" foreground="foreground_pure"/>
+  <style name="cursor"                foreground="ubuntu_purple_lt"/>
+  <style name="secondary-cursor"      foreground="ubuntu_purple"/>
+  <style name="selection"             background="selection_bg" foreground="foreground_pure"/>
+  <style name="selection-unfocused"   background="oled_border" foreground="foreground_pure"/>
+  <style name="current-line"          background="oled_highlight"/>
+  <style name="current-line-number"   background="oled_highlight" foreground="ubuntu_purple_lt" bold="true"/>
+  <style name="line-numbers"          background="pure_black" foreground="foreground_faint"/>
+  <style name="bracket-match"         background="oled_border" foreground="ubuntu_purple_lt" bold="true"/>
+  <style name="bracket-mismatch"      background="dracula_red" foreground="pure_black" bold="true"/>
+  <style name="right-margin"          background="pure_black" foreground="oled_border"/>
+  <style name="draw-spaces"           foreground="foreground_faint"/>
+  <style name="background-pattern"    background="oled_elevated"/>
+  <style name="map-overlay"           background="oled_highlight"/>
+
+  <!-- Default Generic Styles -->
+  <style name="def:comment"               foreground="dracula_comment" italic="true"/>
+  <style name="def:shebang"               foreground="ubuntu_purple_lt" bold="true"/>
+  <style name="def:doc-comment"           foreground="dracula_comment" italic="true"/>
+  <style name="def:doc-comment-element"   foreground="dracula_cyan"/>
+
+  <style name="def:constant"              foreground="dracula_pink"/>
+  <style name="def:special-char"          foreground="dracula_pink"/>
+  <style name="def:base-n-integer"        foreground="dracula_pink"/>
+  <style name="def:decimal"               foreground="dracula_pink"/>
+  <style name="def:floating-point"        foreground="dracula_pink"/>
+  <style name="def:number"                foreground="dracula_pink"/>
+  <style name="def:boolean"               foreground="ubuntu_purple_lt" bold="true"/>
+
+  <style name="def:string"                foreground="dracula_yellow"/>
+  <style name="def:special-constant"      foreground="dracula_pink"/>
+
+  <style name="def:identifier"            foreground="foreground_pure"/>
+  <style name="def:function"              foreground="dracula_green" bold="true"/>
+  <style name="def:keyword"               foreground="dracula_pink" bold="true"/>
+  <style name="def:type"                  foreground="dracula_cyan" italic="false" bold="true"/>
+  <style name="def:preprocessor"          foreground="ubuntu_purple_lt"/>
+  <style name="def:statement"             foreground="dracula_pink" bold="true"/>
+
+  <style name="def:error"                 underline="error" underline-color="dracula_red"/>
+  <style name="def:warning"               underline="error" underline-color="dracula_orange"/>
+  <style name="def:note"                  background="oled_highlight" foreground="dracula_cyan" bold="true"/>
+  <style name="def:underlined"            underline="single"/>
+  <style name="def:deletion"              strikethrough="true" foreground="foreground_faint"/>
+
+  <!-- Markdown High-Contrast Styling -->
+  <style name="def:heading"               foreground="dracula_purple" bold="true"/>
+  <style name="def:thematic-break"        foreground="ubuntu_purple" bold="true"/>
+  <style name="def:list-marker"           foreground="dracula_pink" bold="true"/>
+  <style name="def:inline-code"           foreground="dracula_pink" background="oled_elevated"/>
+  <style name="def:preformatted-section"  foreground="dracula_pink" background="oled_elevated"/>
+  <style name="def:link-destination"      foreground="ubuntu_purple_lt" underline="low" italic="true"/>
+  <style name="def:link-text"             foreground="dracula_cyan" bold="true"/>
+  <style name="def:emphasis"              italic="true" foreground="dracula_yellow"/>
+  <style name="def:strong-emphasis"       bold="true" foreground="dracula_orange"/>
+
+  <!-- Markdown Specific Contexts -->
+  <style name="markdown:header"           foreground="dracula_purple" bold="true"/>
+  <style name="markdown:code-span"        foreground="dracula_pink" background="oled_elevated"/>
+  <style name="markdown:code-block"       foreground="dracula_pink" background="oled_elevated"/>
+  <style name="markdown:blockquote"       foreground="dracula_cyan" italic="true"/>
+  <style name="markdown:url"              foreground="ubuntu_purple_lt" underline="single"/>
+  <style name="markdown:link-text"        foreground="dracula_cyan" bold="true"/>
+  <style name="markdown:list-marker"      foreground="dracula_pink" bold="true"/>
+  <style name="markdown:horizontal-rule"  foreground="ubuntu_purple" bold="true"/>
+
+  <!-- YAML / Frontmatter Styling -->
+  <style name="yaml:key"                  foreground="dracula_cyan" bold="true"/>
+  <style name="yaml:string"               foreground="dracula_yellow"/>
+  <style name="yaml:number"               foreground="dracula_pink"/>
+  <style name="yaml:boolean"              foreground="dracula_pink" bold="true"/>
+  <style name="yaml:document-delimiter"   foreground="dracula_cyan" bold="true"/>
+
+  <!-- Python / Shell Scripting Parity -->
+  <style name="python:builtin-function"   foreground="dracula_cyan"/>
+  <style name="python:class-name"         foreground="dracula_green" bold="true"/>
+  <style name="sh:keyword"                foreground="dracula_pink" bold="true"/>
+  <style name="sh:variable"               foreground="ubuntu_purple_lt"/>
+
+  <!-- Diff Highlighting -->
+  <style name="diff:added-line"           foreground="dracula_green"/>
+  <style name="diff:removed-line"         foreground="dracula_red"/>
+  <style name="diff:changed-line"         foreground="dracula_yellow"/>
+  <style name="diff:location"             foreground="dracula_cyan"/>
+</style-scheme>

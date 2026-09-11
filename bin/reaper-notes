@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+# ==============================================================================
+# Reaper's Notes Executable Launcher
+# ==============================================================================
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+if [ -f "${SCRIPT_DIR}/../src/reaper_notes/main.py" ]; then
+    exec python3 "${SCRIPT_DIR}/../src/reaper_notes/main.py" "$@"
+elif [ -f "/usr/share/reapers-notes/main.py" ]; then
+    exec python3 "/usr/share/reapers-notes/main.py" "$@"
+elif [ -f "/usr/local/share/reapers-notes/main.py" ]; then
+    exec python3 "/usr/local/share/reapers-notes/main.py" "$@"
+elif [ -f "${HOME}/.local/share/reaper-notes/main.py" ]; then
+    exec python3 "${HOME}/.local/share/reaper-notes/main.py" "$@"
+else
+    echo "[reaper-notes] Error: could not locate Reaper's Notes installation." >&2
+    exit 1
+fi
