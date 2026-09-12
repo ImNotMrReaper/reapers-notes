@@ -1883,15 +1883,31 @@ class NotesApplication(Adw.Application):
         args = command_line.get_arguments()
         open_files = []
         create_locked = False
+        insert_text = None
+        rename_title = None
 
-        if len(args) > 1:
-            for arg in args[1:]:
-                if arg in ("--locked", "-l", "--new-locked"):
-                    create_locked = True
-                elif arg in ("--new", "-n"):
+        i = 1
+        while i < len(args):
+            arg = args[i]
+            if arg in ("--locked", "-l", "--new-locked"):
+                create_locked = True
+            elif arg in ("--new", "-n"):
+                pass
+            elif arg == "--insert-text" and i + 1 < len(args):
+                i += 1
+                insert_text = args[i]
+            elif arg == "--insert-file" and i + 1 < len(args):
+                i += 1
+                try:
+                    insert_text = Path(args[i]).read_text(encoding="utf-8")
+                except Exception:
                     pass
-                elif not arg.startswith("-"):
-                    open_files.append(arg)
+            elif arg == "--rename-active" and i + 1 < len(args):
+                i += 1
+                rename_title = args[i]
+            elif not arg.startswith("-"):
+                open_files.append(arg)
+            i += 1
 
         win = self.props.active_window
         if not win:
@@ -1902,8 +1918,20 @@ class NotesApplication(Adw.Application):
                     win.open_tab_with_file(f)
             elif create_locked:
                 win.open_new_tab(create_locked=True)
-            else:
+            elif not insert_text and not rename_title:
                 win.open_new_tab()
+
+        if insert_text:
+            page = win.get_current_page()
+            if page:
+                page.clear_ghost_text()
+                it = page.buffer.get_iter_at_mark(page.buffer.get_insert())
+                content = f"{insert_text}\n" if len(page.get_clean_text().strip()) == 0 else f"\n\n{insert_text}\n"
+                page.buffer.insert(it, content)
+        if rename_title:
+            win.rename_active_document(rename_title)
+        if hasattr(win, "trigger_action_progress"):
+            win.trigger_action_progress(400)
 
         win.present()
         return 0

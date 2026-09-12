@@ -24,6 +24,7 @@ import threading
 import subprocess
 import urllib.request
 import urllib.parse
+import io
 from pathlib import Path
 from typing import List, Tuple, Optional, Any, Callable
 
@@ -455,14 +456,86 @@ class OnlineAsciiFetcher:
                 except Exception:
                     pass
 
-        for fn in [fetch_asciiart_eu, fetch_ascii_co_uk, fetch_ascii_art_de]:
+        def fetch_online_images():
+            if not HAS_PIL:
+                return
+            try:
+                params = urllib.parse.urlencode({
+                    'action': 'query',
+                    'generator': 'search',
+                    'gsrsearch': clean_q,
+                    'gsrnamespace': 6,
+                    'gsrlimit': 4,
+                    'prop': 'imageinfo',
+                    'iiprop': 'url|thumburl|mime',
+                    'iiurlwidth': 400,
+                    'format': 'json'
+                })
+                url = f"https://commons.wikimedia.org/w/api.php?{params}"
+                req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0 (X11; Linux x86_64)"})
+                with urllib.request.urlopen(req, timeout=4.5) as resp:
+                    data = json.loads(resp.read().decode())
+                    pages = data.get("query", {}).get("pages", {})
+                    for pid, p in pages.items():
+                        raw_t = p.get("title", "").replace("File:", "").strip()
+                        title = re.sub(r"\.[a-zA-Z0-9]+$", "", raw_t)
+                        info = p.get("imageinfo", [{}])[0]
+                        thumb = info.get("thumburl") or info.get("url")
+                        if not thumb:
+                            continue
+                        try:
+                            img_req = urllib.request.Request(thumb, headers={"User-Agent": "Mozilla/5.0"})
+                            with urllib.request.urlopen(img_req, timeout=4) as img_resp:
+                                img = Image.open(io.BytesIO(img_resp.read()))
+                                art = AsciiArtEngine.image_to_ascii(img, target_width=68, use_sobel_edges=True)
+                                if len(art.strip()) > 50:
+                                    lines_cnt = len(art.splitlines())
+                                    cols_cnt = max(len(l) for l in art.splitlines()) if art.splitlines() else 0
+                                    with lock:
+                                        results.append({
+                                            "source": "Researched Image",
+                                            "title": f"Image: {title[:28]}",
+                                            "art": art,
+                                            "lines": lines_cnt,
+                                            "cols": cols_cnt
+                                        })
+                        except Exception:
+                            pass
+            except Exception:
+                pass
+
+        def fetch_local_gallery():
+            gallery_dir = Path.home() / ".agents" / "ascii-gallery"
+            if not gallery_dir.exists():
+                return
+            for art_file in gallery_dir.rglob("*.txt"):
+                if clean_q in art_file.stem.lower():
+                    try:
+                        content = art_file.read_text(encoding="utf-8", errors="ignore")
+                        lines = [l for l in content.splitlines() if not l.startswith("#")]
+                        art = "\n".join(lines).strip()
+                        if len(art) > 20:
+                            lines_cnt = len(art.splitlines())
+                            cols_cnt = max(len(l) for l in art.splitlines()) if lines else 0
+                            with lock:
+                                results.append({
+                                    "source": "Local Gallery",
+                                    "title": f"Gallery: {art_file.stem.title()}",
+                                    "art": art,
+                                    "lines": lines_cnt,
+                                    "cols": cols_cnt
+                                })
+                    except Exception:
+                        pass
+
+        for fn in [fetch_asciiart_eu, fetch_ascii_co_uk, fetch_ascii_art_de, fetch_online_images, fetch_local_gallery]:
             t = threading.Thread(target=fn)
             t.daemon = True
             t.start()
             threads.append(t)
 
         for t in threads:
-            t.join(timeout=4.5)
+            t.join(timeout=5.0)
 
         # Deduplicate
         unique_results = []
@@ -780,6 +853,14 @@ class AsciiArtPlugin(NotesPlugin):
                 q = entry_search.get_text().strip() or "ASCII"
                 doc_name = f"{re.sub(r'[^a-zA-Z0-9]+', '_', q).strip('_')}_{item.get('source', 'Web').replace('.', '_')}_Art.txt"
                 self._insert_and_rename(window, item["art"], doc_name)
+                # Save to persistent local gallery for agent and future lookup
+                try:
+                    gal_dir = Path.home() / ".agents" / "ascii-gallery" / "objects"
+                    gal_dir.mkdir(parents=True, exist_ok=True)
+                    clean_fn = re.sub(r'[^a-zA-Z0-9_-]+', '_', q).strip('_').lower() or "art"
+                    (gal_dir / f"{clean_fn}.txt").write_text(f"# Subject: {q}\n# Source: {item.get('source', 'Online Archive')}\n\n" + item["art"], encoding="utf-8")
+                except Exception:
+                    pass
             elif response == "insert_all" and current_results:
                 q = entry_search.get_text().strip() or "ASCII"
                 combined = []
@@ -817,7 +898,7 @@ class AsciiArtPlugin(NotesPlugin):
         entry_prompt.set_placeholder_text("e.g., Grim Reaper, Cyberpunk Dragon, Skull, Spaceship, Castle...")
         content_box.append(entry_prompt)
 
-        chk_online = Gtk.CheckButton(label="Search online archives first (asciiart.eu, ascii.co.uk, ascii-art.de)")
+        chk_online = Gtk.CheckButton(label="Search online archives & research real images (Wikimedia, asciiart.eu, ascii.co.uk)")
         chk_online.set_active(True)
         content_box.append(chk_online)
 
