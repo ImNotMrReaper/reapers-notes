@@ -642,9 +642,15 @@ if __name__ == "__main__":
         if args.style == "banner":
             print(AsciiArtEngine.render_figlet_banner(args.prompt))
         else:
+            done_evt = threading.Event()
             def on_ok(res, name):
                 print(f"=== {name} ===")
                 print(res)
-            AIPromptAsciiGenerator.generate_art(args.prompt, on_success_cb=on_ok)
+                done_evt.set()
+            def on_fail(err):
+                print(f"Error: {err}", file=sys.stderr)
+                done_evt.set()
+            AIPromptAsciiGenerator.generate_art(args.prompt, on_success_cb=on_ok, on_error_cb=on_fail)
+            done_evt.wait(timeout=40)
     else:
         print("Usage: python3 -m reaper_notes.plugins.ascii_plugin --prompt 'Grim Reaper' or --image path/to/img.png")
