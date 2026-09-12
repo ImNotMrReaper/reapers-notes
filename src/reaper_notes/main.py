@@ -17,6 +17,8 @@ Universal GTK4 / Libadwaita / GtkSourceView 5 desktop editor:
 import os
 import sys
 import time
+import shutil
+from datetime import datetime
 from pathlib import Path
 import gi
 
@@ -25,7 +27,7 @@ gi.require_version("GtkSource", "5")
 gi.require_version("Adw", "1")
 from gi.repository import Gtk, GtkSource, Adw, Gdk, GLib, Pango, Gio
 
-from security import authenticate_biometric, encrypt_note, decrypt_note, is_locked_note
+from security import authenticate_biometric, encrypt_note, decrypt_note, is_locked_note, MAGIC_HEADER
 from autocomplete import AutocompleteEngine
 from voice import VoiceDictationManager
 from ai_assistant import dispatch_antigravity_prompt
@@ -38,6 +40,118 @@ DEFAULT_NOTES_DIR = Path.home() / "Documents" / "Notes"
 LOCKED_NOTES_DIR = Path.home() / "Documents" / "Notes" / "Locked"
 THEME_CSS_PATH = Path(__file__).parent / "theme.css"
 DEFAULT_FONT_SIZE = 13
+
+
+def ensure_locked_files_in_locked_dir():
+    """
+    Scans DEFAULT_NOTES_DIR for any locked note files (.locked extension or encrypted header)
+    residing outside LOCKED_NOTES_DIR and automatically relocates them to LOCKED_NOTES_DIR.
+    """
+    try:
+        LOCKED_NOTES_DIR.mkdir(parents=True, exist_ok=True)
+        if not DEFAULT_NOTES_DIR.exists():
+            return
+        for item in DEFAULT_NOTES_DIR.iterdir():
+            if item.is_file() and item.parent.resolve() != LOCKED_NOTES_DIR.resolve():
+                should_move = False
+                if item.name.endswith(".locked"):
+                    should_move = True
+                else:
+                    try:
+                        with open(item, "rb") as f:
+                            header = f.read(len(MAGIC_HEADER))
+                            if header == MAGIC_HEADER:
+                                should_move = True
+                    except Exception:
+                        pass
+                if should_move:
+                    target_name = item.name if item.name.endswith(".locked") else f"{item.stem}.locked"
+                    target = LOCKED_NOTES_DIR / target_name
+                    counter = 1
+                    stem = Path(target_name).stem
+                    while target.exists() and target.resolve() != item.resolve():
+                        target = LOCKED_NOTES_DIR / f"{stem}_{counter}.locked"
+                        counter += 1
+                    shutil.move(str(item), str(target))
+                    print(f"[reaper-notes] Relocated misplaced locked file to Locked folder: {target.name}", file=sys.stderr)
+    except Exception as e:
+        print(f"[reaper-notes] Error checking locked notes directory: {e}", file=sys.stderr)
+
+
+def ensure_page_locked_storage(page) -> str:
+    """
+    Ensures that a locked page's underlying file is located inside LOCKED_NOTES_DIR
+    with a .locked extension. If an existing file exists outside LOCKED_NOTES_DIR,
+    it cleans up the old unencrypted/misplaced file. Returns the new canonical filepath.
+    """
+    LOCKED_NOTES_DIR.mkdir(parents=True, exist_ok=True)
+    if not page.filepath:
+        return ""
+
+    old_path = Path(page.filepath)
+    if old_path.parent.resolve() == LOCKED_NOTES_DIR.resolve() and old_path.name.endswith(".locked"):
+        return str(old_path)
+
+    stem = old_path.stem if not old_path.name.endswith(".locked") else old_path.stem
+    filename = f"{stem}.locked"
+    candidate = LOCKED_NOTES_DIR / filename
+    counter = 1
+    while candidate.exists() and candidate.resolve() != old_path.resolve():
+        candidate = LOCKED_NOTES_DIR / f"{stem}_{counter}.locked"
+        counter += 1
+
+    if old_path.exists() and old_path.resolve() != candidate.resolve():
+        try:
+            old_path.unlink()
+        except Exception:
+            pass
+
+    page.filepath = str(candidate)
+    return str(candidate)
+
+
+def ensure_page_unlocked_storage(page) -> str:
+    """
+    Ensures that an unlocked page's underlying file is moved out of LOCKED_NOTES_DIR
+    into DEFAULT_NOTES_DIR (or retains its original parent if outside LOCKED_NOTES_DIR)
+    with a standard plaintext extension.
+    """
+    DEFAULT_NOTES_DIR.mkdir(parents=True, exist_ok=True)
+    if not page.filepath:
+        return ""
+
+    old_path = Path(page.filepath)
+    if old_path.name.endswith(".locked"):
+        stem = old_path.stem
+        if not any(stem.endswith(ext) for ext in [".txt", ".md", ".py", ".sh", ".c", ".rs", ".json"]):
+            filename = f"{stem}.txt"
+        else:
+            filename = stem
+    else:
+        filename = old_path.name
+
+    if old_path.parent.resolve() == LOCKED_NOTES_DIR.resolve():
+        target_dir = DEFAULT_NOTES_DIR
+    else:
+        target_dir = old_path.parent
+
+    target_dir.mkdir(parents=True, exist_ok=True)
+    candidate = target_dir / filename
+    counter = 1
+    stem_name = Path(filename).stem
+    suffix = Path(filename).suffix
+    while candidate.exists() and candidate.resolve() != old_path.resolve():
+        candidate = target_dir / f"{stem_name}_{counter}{suffix}"
+        counter += 1
+
+    if old_path.exists() and old_path.resolve() != candidate.resolve():
+        try:
+            old_path.unlink()
+        except Exception:
+            pass
+
+    page.filepath = str(candidate)
+    return str(candidate)
 
 
 class EditorPage(Gtk.Box):
@@ -259,18 +373,40 @@ class EditorPage(Gtk.Box):
         with open(path, "rb") as f:
             raw_data = f.read()
 
-        if is_locked_note(raw_data):
-            self.window.set_status_message(f"🔒 Locked note detected. Verifying biometric identity...")
+        is_locked = is_locked_note(raw_data) or path.name.endswith(".locked")
+
+        if is_locked:
+            self.window.set_status_message("🔒 Locked note detected. Verifying biometric identity...")
             if not authenticate_biometric("unlock this encrypted note"):
                 self.window.set_status_message("❌ Biometric authorization failed. Note remains locked.")
                 return
 
             try:
-                plaintext = decrypt_note(raw_data)
+                if is_locked_note(raw_data):
+                    plaintext = decrypt_note(raw_data)
+                else:
+                    plaintext = raw_data.decode("utf-8", errors="replace")
                 self.is_locked = True
             except Exception as e:
                 self.window.set_status_message(f"❌ Decryption failed: {e}")
                 return
+
+            # Automatically ensure locked file is in the locked folder
+            LOCKED_NOTES_DIR.mkdir(parents=True, exist_ok=True)
+            if path.parent.resolve() != LOCKED_NOTES_DIR.resolve() or not path.name.endswith(".locked"):
+                target_name = path.name if path.name.endswith(".locked") else f"{path.stem}.locked"
+                target = LOCKED_NOTES_DIR / target_name
+                counter = 1
+                stem = Path(target_name).stem
+                while target.exists() and target.resolve() != path.resolve():
+                    target = LOCKED_NOTES_DIR / f"{stem}_{counter}.locked"
+                    counter += 1
+                try:
+                    shutil.move(str(path), str(target))
+                    path = target
+                    self.window.set_status_message(f"🔒 Locked note relocated to Locked folder: {path.name}")
+                except Exception as e:
+                    print(f"Failed to move locked note to Locked folder: {e}", file=sys.stderr)
         else:
             self.is_locked = False
             plaintext = raw_data.decode("utf-8", errors="replace")
@@ -287,7 +423,9 @@ class EditorPage(Gtk.Box):
             self._suppress_autocomplete = False
 
         self.window.update_tab_title(self)
-        self.window.set_status_message(f"Loaded {path.name}")
+        self.window.update_lock_button_state()
+        if not is_locked:
+            self.window.set_status_message(f"Loaded {path.name}")
 
     def _detect_and_set_language(self, filepath: str):
         lang = self.lm.guess_language(filepath, None)
@@ -798,6 +936,8 @@ class NotesWindow(Adw.ApplicationWindow):
         style_mgr = Adw.StyleManager.get_default()
         style_mgr.connect("notify::dark", self._on_system_dark_changed)
 
+        ensure_locked_files_in_locked_dir()
+
         if open_files:
             for f in open_files:
                 self.open_tab_with_file(f)
@@ -1065,6 +1205,11 @@ class NotesWindow(Adw.ApplicationWindow):
                 candidate = target_dir / f"{safe_name}_{counter}{ext}"
                 counter += 1
             page.filepath = str(candidate)
+        else:
+            if page.is_locked:
+                ensure_page_locked_storage(page)
+            elif Path(page.filepath).parent.resolve() == LOCKED_NOTES_DIR.resolve():
+                ensure_page_unlocked_storage(page)
 
         path = Path(page.filepath)
         try:
@@ -1147,10 +1292,14 @@ class NotesWindow(Adw.ApplicationWindow):
         if not ext:
             ext = ".locked" if page.is_locked else ".txt"
             safe_name += ext
+        elif page.is_locked and ext != ".locked":
+            safe_name = f"{Path(safe_name).stem}.locked"
 
         if page.filepath:
             old_path = Path(page.filepath)
-            new_path = old_path.parent / safe_name
+            parent_dir = LOCKED_NOTES_DIR if page.is_locked else (DEFAULT_NOTES_DIR if old_path.parent.resolve() == LOCKED_NOTES_DIR.resolve() and not page.is_locked else old_path.parent)
+            parent_dir.mkdir(parents=True, exist_ok=True)
+            new_path = parent_dir / safe_name
             if move_file and old_path.exists() and old_path != new_path:
                 try:
                     old_path.rename(new_path)
@@ -1532,6 +1681,13 @@ class NotesWindow(Adw.ApplicationWindow):
             self.on_action_save_as()
             return
 
+        if page.is_locked:
+            ensure_page_locked_storage(page)
+            page._detect_and_set_language(page.filepath)
+        elif Path(page.filepath).parent.resolve() == LOCKED_NOTES_DIR.resolve():
+            ensure_page_unlocked_storage(page)
+            page._detect_and_set_language(page.filepath)
+
         self.trigger_action_progress(400)
         clean_text = page.get_clean_text()
         path = Path(page.filepath)
@@ -1558,6 +1714,8 @@ class NotesWindow(Adw.ApplicationWindow):
         dialog = Gtk.FileDialog()
         dialog.set_title("Save Document As...")
         suggested_name = page.get_title().replace("• ", "")
+        if page.is_locked and not suggested_name.endswith(".locked"):
+            suggested_name = f"{Path(suggested_name).stem}.locked"
         dialog.set_initial_name(suggested_name)
 
         initial_dir = LOCKED_NOTES_DIR if page.is_locked else DEFAULT_NOTES_DIR
@@ -1572,7 +1730,15 @@ class NotesWindow(Adw.ApplicationWindow):
             if gfile:
                 page = self.get_current_page()
                 if page:
-                    page.filepath = gfile.get_path()
+                    chosen_path = Path(gfile.get_path())
+                    if page.is_locked:
+                        LOCKED_NOTES_DIR.mkdir(parents=True, exist_ok=True)
+                        stem = chosen_path.stem if not chosen_path.name.endswith(".locked") else chosen_path.stem
+                        filename = f"{stem}.locked"
+                        target_path = LOCKED_NOTES_DIR / filename
+                        page.filepath = str(target_path)
+                    else:
+                        page.filepath = str(chosen_path)
                     page._detect_and_set_language(page.filepath)
                     self.on_action_save()
         except Exception:
@@ -1591,22 +1757,15 @@ class NotesWindow(Adw.ApplicationWindow):
                 page.is_locked = True
                 page.is_modified = True
                 if page.filepath:
-                    old_path = page.filepath
-                    if not old_path.endswith(".locked"):
-                        new_path = old_path + ".locked"
-                        try:
-                            if os.path.exists(old_path):
-                                os.remove(old_path)
-                        except Exception:
-                            pass
-                        page.filepath = new_path
+                    ensure_page_locked_storage(page)
+                    page._detect_and_set_language(page.filepath)
                     self.on_action_save()
                 else:
                     page.default_title = "Untitled Locked Note.locked"
                 self.update_tab_title(page)
                 self.update_lock_button_state()
                 self.update_status_bar()
-                self.set_status_message("🔒 Biometric lock engaged. Saved encrypted (AES-256-GCM).")
+                self.set_status_message("🔒 Biometric lock engaged. Saved to Locked folder (AES-256-GCM).")
             else:
                 self.set_status_message("⚠️ Biometric authorization required to lock note.")
         else:
@@ -1614,24 +1773,15 @@ class NotesWindow(Adw.ApplicationWindow):
                 page.is_locked = False
                 page.is_modified = True
                 if page.filepath:
-                    old_path = page.filepath
-                    if old_path.endswith(".locked"):
-                        new_path = old_path[:-7]
-                        if not any(new_path.endswith(ext) for ext in [".txt", ".md", ".py", ".sh", ".c", ".rs", ".json"]):
-                            new_path += ".txt"
-                        try:
-                            if os.path.exists(old_path):
-                                os.remove(old_path)
-                        except Exception:
-                            pass
-                        page.filepath = new_path
+                    ensure_page_unlocked_storage(page)
+                    page._detect_and_set_language(page.filepath)
                     self.on_action_save()
                 else:
                     page.default_title = "Untitled Document.txt"
                 self.update_tab_title(page)
                 self.update_lock_button_state()
                 self.update_status_bar()
-                self.set_status_message("🔓 Document unlocked to standard unencrypted format.")
+                self.set_status_message("🔓 Document unlocked to standard unencrypted format in Notes.")
             else:
                 self.set_status_message("⚠️ Biometric authorization required to unlock note.")
 
@@ -1987,6 +2137,7 @@ def main():
     app = NotesApplication()
     DEFAULT_NOTES_DIR.mkdir(parents=True, exist_ok=True)
     LOCKED_NOTES_DIR.mkdir(parents=True, exist_ok=True)
+    ensure_locked_files_in_locked_dir()
     return app.run(sys.argv)
 
 
