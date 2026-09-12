@@ -378,13 +378,24 @@ class AIPromptAsciiGenerator:
 
                 if chosen_provider == "antigravity" and shutil.which("agy"):
                     res = subprocess.run(
-                        ["agy", "-c", "-p", full_prompt],
+                        ["agy", "-c", "-p", full_prompt, "--output-format", "text"],
+                        stdin=subprocess.DEVNULL,
                         stdout=subprocess.PIPE,
                         stderr=subprocess.PIPE,
                         text=True,
                         timeout=35
                     )
                     art_content = res.stdout.strip()
+                    if not art_content and res.returncode != 0:
+                        res2 = subprocess.run(
+                            ["agy", "-p", full_prompt, "--output-format", "text"],
+                            stdin=subprocess.DEVNULL,
+                            stdout=subprocess.PIPE,
+                            stderr=subprocess.PIPE,
+                            text=True,
+                            timeout=35
+                        )
+                        art_content = res2.stdout.strip()
                 elif chosen_provider == "claude" and shutil.which("claude"):
                     res = subprocess.run(
                         ["claude", "-p", full_prompt],
@@ -436,12 +447,18 @@ class AIPromptAsciiGenerator:
                     )
 
                 if on_success_cb:
-                    GLib.idle_add(on_success_cb, art_content, doc_title)
+                    if GLib.main_depth() > 0:
+                        GLib.idle_add(on_success_cb, art_content, doc_title)
+                    else:
+                        on_success_cb(art_content, doc_title)
 
             except Exception as e:
                 print(f"[AIPromptAsciiGenerator] Error: {e}", file=sys.stderr)
                 if on_error_cb:
-                    GLib.idle_add(on_error_cb, str(e))
+                    if GLib.main_depth() > 0:
+                        GLib.idle_add(on_error_cb, str(e))
+                    else:
+                        on_error_cb(str(e))
 
         threading.Thread(target=worker, daemon=True).start()
 
