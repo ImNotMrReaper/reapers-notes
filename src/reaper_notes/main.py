@@ -56,8 +56,9 @@ class EditorPage(Gtk.Box):
         self.active_ghost_text = ""
         self._suppress_autocomplete = False
         self.font_size_pt = DEFAULT_FONT_SIZE
-        self.voice_sentence_mark = None
-        self.voice_pending_len = 0
+        self.voice_start_mark = None
+        self.voice_end_mark = None
+        self.is_voice_dictating = False
         self._autosave_source_id = None
 
         self.lm = GtkSource.LanguageManager.get_default()
@@ -190,9 +191,6 @@ class EditorPage(Gtk.Box):
 
     def _on_cursor_position_changed(self, *args):
         self.window.update_status_bar()
-        if self.voice_sentence_mark and self.voice_pending_len == 0:
-            insert_iter = self.buffer.get_iter_at_mark(self.buffer.get_insert())
-            self.buffer.move_mark(self.voice_sentence_mark, insert_iter)
 
     def _on_occurrences_count_changed(self, context, param):
         count = context.get_occurrences_count()
@@ -555,32 +553,32 @@ class EditorPage(Gtk.Box):
     # -------------------------------------------------------------------------
     def start_voice_stream(self):
         self._suppress_autocomplete = True
+        self.is_voice_dictating = True
         self.clear_ghost_text()
         it = self.buffer.get_iter_at_mark(self.buffer.get_insert())
-        if self.voice_sentence_mark:
-            self.buffer.delete_mark(self.voice_sentence_mark)
-        self.voice_sentence_mark = self.buffer.create_mark("voice_sentence_start", it, True)
-        self.voice_pending_len = 0
+        if self.voice_start_mark:
+            self.buffer.delete_mark(self.voice_start_mark)
+        if self.voice_end_mark:
+            self.buffer.delete_mark(self.voice_end_mark)
+        self.voice_start_mark = self.buffer.create_mark("voice_start", it, True)
+        self.voice_end_mark = self.buffer.create_mark("voice_end", it, False)
 
     def append_voice_text(self, text: str, is_final: bool):
-        if not text or not self.voice_sentence_mark:
+        if not text or not self.voice_start_mark or not self.voice_end_mark:
             return
 
         self.clear_ghost_text()
         self.buffer.begin_user_action()
         try:
-            # 1. Delete previous unfinalized partial text from this phrase
-            if self.voice_pending_len > 0:
-                start_it = self.buffer.get_iter_at_mark(self.voice_sentence_mark)
-                end_it = start_it.copy()
-                end_it.forward_chars(self.voice_pending_len)
+            # 1. Delete previous partial text between start and end marks
+            start_it = self.buffer.get_iter_at_mark(self.voice_start_mark)
+            end_it = self.buffer.get_iter_at_mark(self.voice_end_mark)
+            if start_it.compare(end_it) != 0:
                 self.buffer.delete(start_it, end_it)
-                self.voice_pending_len = 0
 
             # 2. Re-query start iterator after deletion
-            start_it = self.buffer.get_iter_at_mark(self.voice_sentence_mark)
+            start_it = self.buffer.get_iter_at_mark(self.voice_start_mark)
 
-            # Check if leading space is needed
             prefix = ""
             if not start_it.is_start() and not start_it.starts_line():
                 prev_it = start_it.copy()
@@ -589,54 +587,60 @@ class EditorPage(Gtk.Box):
                     prefix = " "
 
             insert_str = prefix + text
+            # Insert at start_mark. Since start_mark is left_gravity=True and end_mark is left_gravity=False,
+            # start_mark remains at the beginning and end_mark moves to the end of the insertion.
             self.buffer.insert(start_it, insert_str)
-            self.voice_pending_len = len(insert_str)
 
             if is_final:
-                # Phrase completed: commit with trailing space & advance mark
-                end_it = self.buffer.get_iter_at_mark(self.voice_sentence_mark)
-                end_it.forward_chars(self.voice_pending_len)
+                # Commit sentence with a trailing space and advance start_mark
+                end_it = self.buffer.get_iter_at_mark(self.voice_end_mark)
                 self.buffer.insert(end_it, " ")
-
-                new_it = self.buffer.get_iter_at_mark(self.voice_sentence_mark)
-                new_it.forward_chars(self.voice_pending_len + 1)
-                self.buffer.move_mark(self.voice_sentence_mark, new_it)
-                self.voice_pending_len = 0
+                new_start_it = self.buffer.get_iter_at_mark(self.voice_end_mark)
+                self.buffer.move_mark(self.voice_start_mark, new_start_it)
         finally:
             self.buffer.end_user_action()
 
         # Scroll so user sees streaming words live
-        self.editor.scroll_to_mark(self.buffer.get_insert(), 0.05, False, 0.0, 0.0)
+        self.editor.scroll_to_mark(self.voice_end_mark, 0.05, False, 0.0, 0.0)
 
     def finalize_voice_stream(self):
-        if self.voice_sentence_mark:
-            self.buffer.begin_user_action()
-            try:
-                if self.voice_pending_len > 0:
-                    end_it = self.buffer.get_iter_at_mark(self.voice_sentence_mark)
-                    end_it.forward_chars(self.voice_pending_len)
-                    self.buffer.insert(end_it, " ")
-                self.buffer.delete_mark(self.voice_sentence_mark)
-                self.voice_sentence_mark = None
-                self.voice_pending_len = 0
-            finally:
-                self.buffer.end_user_action()
+        self.buffer.begin_user_action()
+        try:
+            if self.voice_end_mark:
+                end_it = self.buffer.get_iter_at_mark(self.voice_end_mark)
+                if not end_it.is_start():
+                    prev_it = end_it.copy()
+                    prev_it.backward_char()
+                    if prev_it.get_char() not in (" ", "\n", "\t"):
+                        self.buffer.insert(end_it, " ")
+            if self.voice_start_mark:
+                self.buffer.delete_mark(self.voice_start_mark)
+                self.voice_start_mark = None
+            if self.voice_end_mark:
+                self.buffer.delete_mark(self.voice_end_mark)
+                self.voice_end_mark = None
+        finally:
+            self.buffer.end_user_action()
+        self.is_voice_dictating = False
         self._suppress_autocomplete = False
 
     def cancel_voice_stream(self):
-        if self.voice_sentence_mark:
-            self.buffer.begin_user_action()
-            try:
-                if self.voice_pending_len > 0:
-                    start_it = self.buffer.get_iter_at_mark(self.voice_sentence_mark)
-                    end_it = start_it.copy()
-                    end_it.forward_chars(self.voice_pending_len)
+        self.buffer.begin_user_action()
+        try:
+            if self.voice_start_mark and self.voice_end_mark:
+                start_it = self.buffer.get_iter_at_mark(self.voice_start_mark)
+                end_it = self.buffer.get_iter_at_mark(self.voice_end_mark)
+                if start_it.compare(end_it) != 0:
                     self.buffer.delete(start_it, end_it)
-                self.buffer.delete_mark(self.voice_sentence_mark)
-                self.voice_sentence_mark = None
-                self.voice_pending_len = 0
-            finally:
-                self.buffer.end_user_action()
+            if self.voice_start_mark:
+                self.buffer.delete_mark(self.voice_start_mark)
+                self.voice_start_mark = None
+            if self.voice_end_mark:
+                self.buffer.delete_mark(self.voice_end_mark)
+                self.voice_end_mark = None
+        finally:
+            self.buffer.end_user_action()
+        self.is_voice_dictating = False
         self._suppress_autocomplete = False
 
 

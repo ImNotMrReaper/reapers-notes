@@ -146,6 +146,17 @@ class WhisperEngine:
                 # Filter audio markers, timestamps, bracketed tags
                 clean = re.sub(r"\[.*?\]|\(.*?\)", "", raw)
                 clean = re.sub(r"\s+", " ", clean).strip()
+
+                # Deduplicate consecutive hallucinated loops (e.g. "Hello. Hello. Hello.")
+                sentences = [s.strip() for s in re.split(r'(?<=[.?!])\s+', clean) if s.strip()]
+                if len(sentences) > 1:
+                    deduped = []
+                    for s in sentences:
+                        s_norm = s.lower().strip(".?!, ")
+                        if not deduped or s_norm != deduped[-1].lower().strip(".?!, "):
+                            deduped.append(s)
+                    clean = " ".join(deduped)
+
                 return clean
             except Exception as e:
                 print(f"[WhisperEngine] Transcribe error: {e}", file=sys.stderr)
@@ -276,10 +287,9 @@ class VoiceDictationManager:
                     if silence_duration_ms >= 400 and len(accumulated_sentence) >= min_sentence_samples:
                         text = self.engine.transcribe_samples(
                             accumulated_sentence,
-                            prompt=last_context_prompt
+                            prompt=""
                         )
                         if text:
-                            last_context_prompt = text[-40:]
                             GLib.idle_add(on_partial_cb, text, True)
 
                         accumulated_sentence = []
@@ -287,12 +297,12 @@ class VoiceDictationManager:
                         silence_count = 0
                         last_partial_len = 0
 
-                    # Condition B: Streaming partial feedback (every ~0.25s of speech for live screen rendering)
-                    elif (len(accumulated_sentence) - last_partial_len) >= int(0.25 * sample_rate):
+                    # Condition B: Streaming partial feedback (every ~0.35s of speech for live screen rendering)
+                    elif (len(accumulated_sentence) - last_partial_len) >= int(0.35 * sample_rate):
                         last_partial_len = len(accumulated_sentence)
                         text = self.engine.transcribe_samples(
                             accumulated_sentence,
-                            prompt=last_context_prompt
+                            prompt=""
                         )
                         if text:
                             GLib.idle_add(on_partial_cb, text, False)
@@ -301,10 +311,9 @@ class VoiceDictationManager:
                     if len(accumulated_sentence) >= max_sentence_samples:
                         text = self.engine.transcribe_samples(
                             accumulated_sentence,
-                            prompt=last_context_prompt
+                            prompt=""
                         )
                         if text:
-                            last_context_prompt = text[-40:]
                             GLib.idle_add(on_partial_cb, text, True)
                         accumulated_sentence = []
                         speech_detected_in_sentence = False
@@ -323,7 +332,7 @@ class VoiceDictationManager:
             if not self._cancel_flag and accumulated_sentence and len(accumulated_sentence) >= int(0.3 * sample_rate):
                 final_text = self.engine.transcribe_samples(
                     accumulated_sentence,
-                    prompt=last_context_prompt
+                    prompt=""
                 )
                 if final_text:
                     GLib.idle_add(on_partial_cb, final_text, True)
