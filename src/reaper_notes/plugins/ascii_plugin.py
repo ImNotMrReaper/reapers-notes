@@ -42,11 +42,25 @@ gi.require_version("Adw", "1")
 gi.require_version("Gio", "2.0")
 from gi.repository import Gtk, Adw, Gio, GLib
 
-from .base import NotesPlugin
+try:
+    from .base import NotesPlugin
+except (ImportError, ValueError):
+    try:
+        from base import NotesPlugin
+    except (ImportError, ValueError):
+        class NotesPlugin:
+            id = "base"
+            name = "Base"
+            enabled = True
+
 try:
     from ..settings import get_setting, set_setting
 except (ImportError, ValueError):
-    from settings import get_setting, set_setting
+    try:
+        from settings import get_setting, set_setting
+    except (ImportError, ValueError):
+        def get_setting(k, d=None): return d
+        def set_setting(k, v): pass
 
 
 # -----------------------------------------------------------------------------
