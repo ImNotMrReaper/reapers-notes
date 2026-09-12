@@ -63,6 +63,9 @@ class ObsidianPlugin(NotesPlugin):
 
     def push_note(self, window: Any):
         """Pushes current document content to the active Obsidian vault."""
+        if hasattr(window, "trigger_action_progress"):
+            window.trigger_action_progress(600)
+
         page = window.get_current_page()
         if not page:
             window.set_status_message("⚠️ No active note to push.")

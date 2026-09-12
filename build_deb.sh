@@ -7,7 +7,7 @@ set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BUILD_DIR="${SCRIPT_DIR}/build/deb"
-VERSION="1.2.1"
+VERSION="1.3.0"
 PKG_NAME="reapers-notes"
 ARCH="$(dpkg --print-architecture 2>/dev/null || echo "amd64")"
 DEB_FILE="${PKG_NAME}_${VERSION}_${ARCH}.deb"

@@ -56,6 +56,30 @@ box.notes-statusbar {
     font-weight: 600;
 }
 
+/* Animated Purple Action Progress Bar (Save / Push to Obsidian / AI) */
+progressbar.action-progress-bar {
+    min-height: 2px;
+    padding: 0;
+    margin: 0;
+}
+
+progressbar.action-progress-bar > trough {
+    min-height: 2px;
+    background-color: transparent;
+    border: none;
+    box-shadow: none;
+    padding: 0;
+    margin: 0;
+}
+
+progressbar.action-progress-bar > trough > progress {
+    min-height: 2px;
+    background-color: #7764d8;
+    border: none;
+    border-radius: 1px;
+    box-shadow: 0 0 8px #7764d8;
+}
+
 button.language-selector-btn {
     background: transparent;
     border: none;

@@ -230,8 +230,8 @@ class VoiceDictationManager:
         sample_rate = 16000
         chunk_samples = 1600  # 100ms
         chunk_bytes = chunk_samples * 2  # 16-bit signed PCM
-        min_sentence_samples = int(0.6 * sample_rate)  # at least 600ms before transcribing
-        max_sentence_samples = int(4.0 * sample_rate)  # auto-commit long sentence at 4.0s
+        min_sentence_samples = int(0.25 * sample_rate)  # 250ms for instant initial response
+        max_sentence_samples = int(3.5 * sample_rate)   # auto-commit continuous speech at 3.5s
         ambient_rms = 400.0
         calibrated_chunks = 0
         last_partial_len = 0
@@ -252,12 +252,12 @@ class VoiceDictationManager:
                 sum_sq = sum(s * s for s in samples)
                 rms = math.sqrt(sum_sq / num_samples) if num_samples > 0 else 0.0
 
-                if calibrated_chunks < 4:
+                if calibrated_chunks < 2:
                     ambient_rms = (ambient_rms * calibrated_chunks + rms) / (calibrated_chunks + 1)
                     calibrated_chunks += 1
                     continue
 
-                threshold = max(220.0, ambient_rms * 1.4 + 120.0)
+                threshold = max(200.0, ambient_rms * 1.35 + 100.0)
 
                 if rms > threshold:
                     speech_detected_in_sentence = True
@@ -271,9 +271,9 @@ class VoiceDictationManager:
                 if speech_detected_in_sentence:
                     accumulated_sentence.extend(samples)
 
-                    # Condition A: Natural pause (silence >= 600ms after speech)
+                    # Condition A: Natural pause (silence >= 400ms after speech)
                     silence_duration_ms = silence_count * 100
-                    if silence_duration_ms >= 600 and len(accumulated_sentence) >= min_sentence_samples:
+                    if silence_duration_ms >= 400 and len(accumulated_sentence) >= min_sentence_samples:
                         text = self.engine.transcribe_samples(
                             accumulated_sentence,
                             prompt=last_context_prompt
@@ -287,8 +287,8 @@ class VoiceDictationManager:
                         silence_count = 0
                         last_partial_len = 0
 
-                    # Condition B: Streaming partial feedback (every ~0.9s of speech)
-                    elif (len(accumulated_sentence) - last_partial_len) >= int(0.9 * sample_rate):
+                    # Condition B: Streaming partial feedback (every ~0.25s of speech for live screen rendering)
+                    elif (len(accumulated_sentence) - last_partial_len) >= int(0.25 * sample_rate):
                         last_partial_len = len(accumulated_sentence)
                         text = self.engine.transcribe_samples(
                             accumulated_sentence,
@@ -297,7 +297,7 @@ class VoiceDictationManager:
                         if text:
                             GLib.idle_add(on_partial_cb, text, False)
 
-                    # Condition C: Long sentence auto-commit (>= 4.0s continuous)
+                    # Condition C: Long sentence auto-commit (>= 3.5s continuous)
                     if len(accumulated_sentence) >= max_sentence_samples:
                         text = self.engine.transcribe_samples(
                             accumulated_sentence,

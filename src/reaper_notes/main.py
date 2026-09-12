@@ -34,7 +34,7 @@ from obsidian import discover_vaults, get_default_vault, push_to_obsidian, creat
 from plugins.manager import PluginManager, USER_PLUGINS_DIR
 
 VAULT_DIR = Path.home() / "Documents" / "Valut"
-DEFAULT_NOTES_DIR = VAULT_DIR if VAULT_DIR.exists() else (Path.home() / "Documents" / "Notes")
+DEFAULT_NOTES_DIR = Path.home() / "Documents" / "Notes"
 LOCKED_NOTES_DIR = Path.home() / "Documents" / "Notes" / "Locked"
 THEME_CSS_PATH = Path(__file__).parent / "theme.css"
 DEFAULT_FONT_SIZE = 13
@@ -42,6 +42,10 @@ DEFAULT_FONT_SIZE = 13
 
 class EditorPage(Gtk.Box):
     """Represents a single tab document in the editor."""
+
+    @property
+    def title(self) -> str:
+        return self.get_title()
 
     def __init__(self, window, filepath=None, create_locked=False):
         super().__init__(orientation=Gtk.Orientation.VERTICAL)
@@ -880,6 +884,12 @@ class NotesWindow(Adw.ApplicationWindow):
 
         self.header.pack_end(right_box)
 
+        # Action Progress Bar (thin purple line across top of window during save/push)
+        self.progress_bar = Gtk.ProgressBar()
+        self.progress_bar.add_css_class("action-progress-bar")
+        self.progress_bar.set_visible(False)
+        root_box.append(self.progress_bar)
+
         # 2. Tab Bar & Tab View
         self.tab_view = Adw.TabView()
         self.tab_view.connect("notify::selected-page", self._on_selected_tab_changed)
@@ -944,6 +954,7 @@ class NotesWindow(Adw.ApplicationWindow):
             ("obsidian_new", lambda *_: self.create_new_obsidian_note()),
             ("obsidian_manage_vaults", lambda *_: self.show_obsidian_vaults()),
             ("obsidian_choose_folder", lambda *_: self.choose_obsidian_folder()),
+            ("ascii_art_generate", lambda *_: self.trigger_ascii_art()),
             ("show_plugins_manager", lambda *_: self.plugin_manager.show_manager_dialog()),
             ("open_plugins_folder", lambda *_: self.open_plugins_folder()),
         ]
@@ -956,6 +967,102 @@ class NotesWindow(Adw.ApplicationWindow):
         key_ctrl = Gtk.EventControllerKey.new()
         key_ctrl.connect("key-pressed", self.on_key_pressed)
         self.add_controller(key_ctrl)
+        self.connect("close-request", self._on_window_close_requested)
+
+    def trigger_action_progress(self, duration_ms: int = 500):
+        """Animates a subtle purple progress line across the window like GNOME Text Editor."""
+        self.progress_bar.set_visible(True)
+        self.progress_bar.set_fraction(0.0)
+        steps = 15
+        interval = max(15, duration_ms // steps)
+        current_step = 0
+
+        def on_step():
+            nonlocal current_step
+            current_step += 1
+            self.progress_bar.set_fraction(current_step / steps)
+            if current_step >= steps:
+                GLib.timeout_add(150, lambda: self.progress_bar.set_visible(False))
+                return GLib.SOURCE_REMOVE
+            return GLib.SOURCE_CONTINUE
+
+        GLib.timeout_add(interval, on_step)
+
+    def _on_window_close_requested(self, window):
+        """Checks for modified/unsaved tabs before allowing the window to close."""
+        modified_pages = []
+        for i in range(self.tab_view.get_n_pages()):
+            adw_page = self.tab_view.get_nth_page(i)
+            child = adw_page.get_child()
+            if child and child.is_modified:
+                modified_pages.append((adw_page, child))
+
+        if not modified_pages:
+            return False
+
+        if len(modified_pages) == 1:
+            title = modified_pages[0][1].get_title()
+            heading = f'Save changes to "{title}" before closing?'
+            body = "If you close without saving, your changes will be discarded."
+        else:
+            heading = f"Save changes to {len(modified_pages)} open notes before closing?"
+            body = "There are unsaved changes. Discarding will permanently lose them."
+
+        dialog = Adw.MessageDialog(
+            transient_for=self,
+            heading=heading,
+            body=body,
+        )
+        dialog.add_response("cancel", "Cancel")
+        dialog.add_response("discard", "Discard All")
+        dialog.add_response("save", "Save All" if len(modified_pages) > 1 else "Save")
+        dialog.set_response_appearance("discard", Adw.ResponseAppearance.DESTRUCTIVE)
+        dialog.set_response_appearance("save", Adw.ResponseAppearance.SUGGESTED)
+
+        def on_response(d, response):
+            if response == "save":
+                for adw_page, page in modified_pages:
+                    self.tab_view.set_selected_page(adw_page)
+                    self.on_action_save()
+                self.destroy()
+            elif response == "discard":
+                self.destroy()
+
+        dialog.connect("response", on_response)
+        dialog.present()
+        return True
+
+    def rename_active_document(self, new_name: str, move_file: bool = True):
+        """Renames the current document tab and underlying file on disk (if saved)."""
+        page = self.get_current_page()
+        if not page:
+            return
+
+        safe_name = "".join(c for c in new_name if c.isalnum() or c in (" ", "-", "_", ".")).strip()
+        if not safe_name:
+            safe_name = "Untitled Note"
+
+        ext = Path(safe_name).suffix
+        if not ext:
+            ext = ".locked" if page.is_locked else ".txt"
+            safe_name += ext
+
+        if page.filepath:
+            old_path = Path(page.filepath)
+            new_path = old_path.parent / safe_name
+            if move_file and old_path.exists() and old_path != new_path:
+                try:
+                    old_path.rename(new_path)
+                except Exception as e:
+                    print(f"Failed to rename file on disk: {e}", file=sys.stderr)
+            page.filepath = str(new_path)
+            page._detect_and_set_language(page.filepath)
+        else:
+            page.default_title = safe_name
+
+        self.update_tab_title(page)
+        self.update_status_bar()
+        self.set_status_message(f"Renamed note to: {safe_name}")
 
     def get_current_page(self) -> EditorPage:
         adw_page = self.tab_view.get_selected_page()
@@ -1152,6 +1259,11 @@ class NotesWindow(Adw.ApplicationWindow):
             self.trigger_ai_prompt()
             return True
 
+        # Hotkey: Ctrl+Alt+I -> Generate ASCII Art
+        if ctrl and alt and keyval in (Gdk.KEY_i, Gdk.KEY_I):
+            self.trigger_ascii_art()
+            return True
+
         # Hotkey: Ctrl+Alt+O -> Push Note to Obsidian Vault
         if ctrl and alt and keyval in (Gdk.KEY_o, Gdk.KEY_O):
             self.push_current_note_to_obsidian()
@@ -1306,6 +1418,7 @@ class NotesWindow(Adw.ApplicationWindow):
             self.on_action_save_as()
             return
 
+        self.trigger_action_progress(400)
         clean_text = page.get_clean_text()
         path = Path(page.filepath)
 
@@ -1490,6 +1603,14 @@ class NotesWindow(Adw.ApplicationWindow):
         else:
             self._legacy_ai_prompt()
 
+    def trigger_ascii_art(self):
+        """Presents ASCII art generator dialog or converts subject/image to ASCII."""
+        ascii_plug = self.plugin_manager.get_plugin("ascii_art")
+        if ascii_plug and ascii_plug.enabled:
+            ascii_plug.show_prompt_dialog(self)
+        else:
+            self.set_status_message("⚠️ ASCII Art plugin is not loaded.")
+
     def _legacy_ai_prompt(self):
         page = self.get_current_page()
         if not page:
@@ -1557,6 +1678,7 @@ class NotesWindow(Adw.ApplicationWindow):
 
     def push_current_note_to_obsidian(self):
         """Pushes active document to the default Obsidian vault."""
+        self.trigger_action_progress(600)
         obsidian_plug = self.plugin_manager.get_plugin("obsidian_sync")
         if obsidian_plug and obsidian_plug.enabled:
             obsidian_plug.push_note(self)

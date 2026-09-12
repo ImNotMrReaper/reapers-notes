@@ -21,6 +21,7 @@ from .base import NotesPlugin
 from .example_plugin import ExampleToolsPlugin
 from .ai_plugin import AIAssistantPlugin
 from .obsidian_plugin import ObsidianPlugin
+from .ascii_plugin import AsciiArtPlugin
 try:
     from ..settings import get_setting, set_setting
 except (ImportError, ValueError):
@@ -46,6 +47,7 @@ class PluginManager:
         builtins = [
             AIAssistantPlugin(),
             ObsidianPlugin(),
+            AsciiArtPlugin(),
             ExampleToolsPlugin(),
         ]
         for p in builtins:
