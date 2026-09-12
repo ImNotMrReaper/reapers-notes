@@ -11,3 +11,4 @@ dist/
 *.swp
 *~
 *.deb
+.agy_link/

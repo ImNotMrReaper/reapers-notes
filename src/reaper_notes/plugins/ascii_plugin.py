@@ -18,9 +18,12 @@ import re
 import sys
 import math
 import json
+import html
 import shutil
 import threading
 import subprocess
+import urllib.request
+import urllib.parse
 from pathlib import Path
 from typing import List, Tuple, Optional, Any, Callable
 
@@ -324,6 +327,155 @@ class AsciiArtEngine:
 # -----------------------------------------------------------------------------
 # AI Prompt-to-ASCII Art Generator
 # -----------------------------------------------------------------------------
+# -----------------------------------------------------------------------------
+# Multi-Source Online ASCII Art Fetcher & Search Engine
+# -----------------------------------------------------------------------------
+class OnlineAsciiFetcher:
+    """
+    Asynchronously queries multiple online ASCII art repositories:
+      - asciiart.eu (largest curated web archive with categorized collections)
+      - ascii.co.uk (classic Usenet & retro terminal ASCII art)
+      - ascii-art.de (alphabetical text file archive)
+    Returns normalized, deduplicated ASCII art candidates with source attribution.
+    """
+
+    @classmethod
+    def search_all_sources(cls, query: str, limit_per_source: int = 5) -> List[dict]:
+        results = []
+        lock = threading.Lock()
+        threads = []
+        clean_q = query.strip().lower()
+        slug_q = re.sub(r"[^a-z0-9]+", "-", clean_q).strip("-")
+        if not slug_q:
+            return []
+        raw_q = urllib.parse.quote(clean_q)
+
+        def fetch_asciiart_eu():
+            try:
+                url = f"https://www.asciiart.eu/search?q={raw_q}"
+                req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0 (X11; Linux x86_64)"})
+                with urllib.request.urlopen(req, timeout=4) as r:
+                    raw = r.read().decode("utf-8", errors="ignore")
+                    cards = re.findall(r"class=[\"\'][^\"\']*art-card__ascii[^\"\']*[\"\'][^>]*>(.*?)</div>", raw, re.DOTALL)
+                    found = 0
+                    for c in cards:
+                        text = html.unescape(re.sub(r"<[^>]+>", "", c)).strip()
+                        lines = [l for l in text.splitlines() if l.strip()]
+                        if len(lines) >= 2 and len(text) > 30:
+                            max_cols = max(len(l) for l in text.splitlines()) if text.splitlines() else 0
+                            with lock:
+                                results.append({
+                                    "source": "asciiart.eu",
+                                    "title": query.title(),
+                                    "art": text,
+                                    "lines": len(text.splitlines()),
+                                    "cols": max_cols
+                                })
+                            found += 1
+                            if found >= limit_per_source:
+                                break
+            except Exception:
+                pass
+
+        def fetch_ascii_co_uk():
+            variants = [slug_q]
+            if slug_q.endswith("s"):
+                variants.append(slug_q[:-1])
+            else:
+                variants.append(slug_q + "s")
+
+            for variant in variants:
+                try:
+                    url = f"https://ascii.co.uk/art/{variant}"
+                    req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0 (X11; Linux x86_64)"})
+                    with urllib.request.urlopen(req, timeout=4) as r:
+                        raw = r.read().decode("utf-8", errors="ignore")
+                        pres = re.findall(r"<pre[^>]*>(.*?)</pre>", raw, re.DOTALL)
+                        found = 0
+                        for p in pres:
+                            if "ASCII Character Codes" in p or "<blockquote>" in p:
+                                continue
+                            p_clean = re.sub(r'<[^>]+>', '', p)
+                            text = html.unescape(p_clean).strip()
+                            lines = text.splitlines()
+                            cleaned_lines = [l for l in lines if not l.strip().startswith("See ") and not "for more !" in l]
+                            text = "\n".join(cleaned_lines).strip()
+                            non_empty = [l for l in text.splitlines() if l.strip()]
+                            if len(non_empty) >= 2 and len(text) > 30:
+                                max_cols = max(len(l) for l in text.splitlines()) if text.splitlines() else 0
+                                with lock:
+                                    results.append({
+                                        "source": "ascii.co.uk",
+                                        "title": query.title(),
+                                        "art": text,
+                                        "lines": len(text.splitlines()),
+                                        "cols": max_cols
+                                    })
+                                found += 1
+                                if found >= limit_per_source:
+                                    break
+                        if found > 0:
+                            break
+                except Exception:
+                    pass
+
+        def fetch_ascii_art_de():
+            letter = slug_q[0]
+            candidates = [f"https://www.ascii-art.de/ascii/{letter}/{slug_q}.txt"]
+            if slug_q.endswith("s"):
+                candidates.append(f"https://www.ascii-art.de/ascii/{letter}/{slug_q[:-1]}.txt")
+            else:
+                candidates.append(f"https://www.ascii-art.de/ascii/{letter}/{slug_q}s.txt")
+
+            for candidate in candidates:
+                try:
+                    req = urllib.request.Request(candidate, headers={"User-Agent": "Mozilla/5.0 (X11; Linux x86_64)"})
+                    with urllib.request.urlopen(req, timeout=4) as r:
+                        content = r.read().decode("utf-8", errors="ignore")
+                        blocks = re.split(r"\n\s*[-_=]{10,}\s*\n|\n{4,}", content)
+                        found = 0
+                        for b in blocks:
+                            text = b.strip()
+                            lines = [l for l in text.splitlines() if l.strip()]
+                            if len(lines) >= 3 and len(text) > 40 and not text.lower().startswith("ascii art by"):
+                                max_cols = max(len(l) for l in text.splitlines()) if text.splitlines() else 0
+                                with lock:
+                                    results.append({
+                                        "source": "ascii-art.de",
+                                        "title": query.title(),
+                                        "art": text,
+                                        "lines": len(text.splitlines()),
+                                        "cols": max_cols
+                                    })
+                                found += 1
+                                if found >= limit_per_source:
+                                    break
+                        if found > 0:
+                            break
+                except Exception:
+                    pass
+
+        for fn in [fetch_asciiart_eu, fetch_ascii_co_uk, fetch_ascii_art_de]:
+            t = threading.Thread(target=fn)
+            t.daemon = True
+            t.start()
+            threads.append(t)
+
+        for t in threads:
+            t.join(timeout=4.5)
+
+        # Deduplicate
+        unique_results = []
+        seen_art = set()
+        for r in results:
+            normalized = "".join(r["art"].split())
+            if normalized not in seen_art:
+                seen_art.add(normalized)
+                unique_results.append(r)
+
+        return unique_results
+
+
 class AIPromptAsciiGenerator:
     """
     Synthesizes custom ASCII art based on user prompts using Antigravity CLI,
@@ -491,17 +643,168 @@ class AsciiArtPlugin(NotesPlugin):
 
     def get_menu_items(self, window: Any):
         return [
+            ("Search Online ASCII Art Archives... (Ctrl+Shift+I)", lambda: self.show_online_search_dialog(window)),
             ("Generate AI ASCII Art... (Ctrl+Alt+I)", lambda: self.show_prompt_dialog(window)),
             ("Convert Image to ASCII / Braille...", lambda: self.show_image_dialog(window)),
             ("Render FIGlet Typography Banner...", lambda: self.show_figlet_dialog(window)),
         ]
 
+    def show_online_search_dialog(self, window: Any, initial_query: str = "", preloaded_results: Optional[List[dict]] = None):
+        """Displays interactive multi-source online ASCII art browser & previewer."""
+        dialog = Adw.MessageDialog(
+            transient_for=window,
+            heading="Online ASCII Art Archives",
+            body="Search across asciiart.eu, ascii.co.uk, and ascii-art.de collections:"
+        )
+
+        content_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
+        content_box.set_margin_top(8)
+        content_box.set_margin_bottom(8)
+        content_box.set_margin_start(16)
+        content_box.set_margin_end(16)
+
+        # Search row
+        search_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        entry_search = Gtk.Entry()
+        entry_search.set_hexpand(True)
+        entry_search.set_placeholder_text("Search query, e.g. dragon, skull, reaper, sword, cat...")
+        if initial_query:
+            entry_search.set_text(initial_query)
+        btn_search = Gtk.Button(label="Search Online")
+        btn_search.add_css_class("suggested-action")
+        search_box.append(entry_search)
+        search_box.append(btn_search)
+        content_box.append(search_box)
+
+        # Status & navigation row
+        nav_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        btn_prev = Gtk.Button.new_from_icon_name("go-previous-symbolic")
+        btn_prev.set_tooltip_text("Previous Artwork")
+        btn_next = Gtk.Button.new_from_icon_name("go-next-symbolic")
+        btn_next.set_tooltip_text("Next Artwork")
+        lbl_status = Gtk.Label(label="Enter a query to search online archives.")
+        lbl_status.set_hexpand(True)
+        lbl_status.set_xalign(0.0)
+        lbl_status.add_css_class("dim-label")
+
+        nav_box.append(btn_prev)
+        nav_box.append(btn_next)
+        nav_box.append(lbl_status)
+        content_box.append(nav_box)
+
+        # Monospaced preview canvas
+        scroll = Gtk.ScrolledWindow()
+        scroll.set_min_content_height(260)
+        scroll.set_max_content_height(360)
+        scroll.set_min_content_width(540)
+        scroll.add_css_class("card")
+
+        preview_tv = Gtk.TextView()
+        preview_tv.set_monospace(True)
+        preview_tv.set_editable(False)
+        preview_tv.set_cursor_visible(False)
+        preview_tv.set_top_margin(8)
+        preview_tv.set_bottom_margin(8)
+        preview_tv.set_left_margin(12)
+        preview_tv.set_right_margin(12)
+        preview_buf = preview_tv.get_buffer()
+        scroll.set_child(preview_tv)
+        content_box.append(scroll)
+
+        dialog.set_extra_child(content_box)
+        dialog.add_response("cancel", "Cancel")
+        dialog.add_response("insert_all", "Insert All")
+        dialog.add_response("insert", "Insert This Art")
+        dialog.set_response_appearance("insert", Adw.ResponseAppearance.SUGGESTED)
+        dialog.set_default_response("insert")
+
+        current_results = list(preloaded_results or [])
+        current_idx = [0]
+
+        def update_view():
+            if not current_results:
+                btn_prev.set_sensitive(False)
+                btn_next.set_sensitive(False)
+                preview_buf.set_text("")
+                dialog.set_response_enabled("insert", False)
+                dialog.set_response_enabled("insert_all", False)
+                return
+
+            idx = current_idx[0]
+            item = current_results[idx]
+            src = item.get("source", "Web")
+            lines = item.get("lines", 0)
+            cols = item.get("cols", 0)
+            lbl_status.set_text(f"Match {idx + 1} of {len(current_results)} • [{src}] ({lines} lines x {cols} cols)")
+            preview_buf.set_text(item.get("art", ""))
+            btn_prev.set_sensitive(idx > 0)
+            btn_next.set_sensitive(idx < len(current_results) - 1)
+            dialog.set_response_enabled("insert", True)
+            dialog.set_response_enabled("insert_all", True)
+
+        def do_search():
+            q = entry_search.get_text().strip()
+            if not q:
+                return
+            btn_search.set_sensitive(False)
+            lbl_status.set_text(f"Searching online archives for '{q}'...")
+            if hasattr(window, "trigger_action_progress"):
+                window.trigger_action_progress(1000)
+
+            def worker():
+                res = OnlineAsciiFetcher.search_all_sources(q)
+                def on_done():
+                    btn_search.set_sensitive(True)
+                    current_results.clear()
+                    current_results.extend(res)
+                    current_idx[0] = 0
+                    if res:
+                        update_view()
+                        window.set_status_message(f"🌐 Found {len(res)} online artworks for '{q}'")
+                    else:
+                        lbl_status.set_text(f"No online matches found for '{q}'. Try another keyword.")
+                        update_view()
+                GLib.idle_add(on_done)
+
+            threading.Thread(target=worker, daemon=True).start()
+
+        btn_search.connect("clicked", lambda _: do_search())
+        entry_search.connect("activate", lambda _: do_search())
+
+        btn_prev.connect("clicked", lambda _: (current_idx.__setitem__(0, max(0, current_idx[0] - 1)), update_view()))
+        btn_next.connect("clicked", lambda _: (current_idx.__setitem__(0, min(len(current_results) - 1, current_idx[0] + 1)), update_view()))
+
+        def on_response(d, response):
+            if response == "insert" and current_results:
+                item = current_results[current_idx[0]]
+                q = entry_search.get_text().strip() or "ASCII"
+                doc_name = f"{re.sub(r'[^a-zA-Z0-9]+', '_', q).strip('_')}_{item.get('source', 'Web').replace('.', '_')}_Art.txt"
+                self._insert_and_rename(window, item["art"], doc_name)
+            elif response == "insert_all" and current_results:
+                q = entry_search.get_text().strip() or "ASCII"
+                combined = []
+                for i, r in enumerate(current_results):
+                    combined.append(f"# [{r.get('source', 'Web')}] Artwork {i+1}\n" + r["art"])
+                doc_name = f"{re.sub(r'[^a-zA-Z0-9]+', '_', q).strip('_')}_Multi_Art.txt"
+                self._insert_and_rename(window, "\n\n" + ("\n" + "="*50 + "\n\n").join(combined), doc_name)
+            d.close()
+
+        dialog.connect("response", on_response)
+        if preloaded_results:
+            update_view()
+        elif initial_query:
+            do_search()
+        else:
+            update_view()
+
+        dialog.present()
+
     def show_prompt_dialog(self, window: Any):
-        """Displays the AI ASCII Art Generator dialog."""
+        """Displays the AI ASCII Art Generator dialog with online archives integration."""
         dialog = Adw.MessageDialog(
             transient_for=window,
             heading="Generate AI ASCII Art",
-            body="Describe the subject or scene to render in monospaced ASCII art:\n(The active note tab and file will be automatically renamed to match)"
+            body="Describe the subject or scene to render in monospaced ASCII art:\n(Searches online archives first, then falls back to AI generation)"
         )
 
         content_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
@@ -514,9 +817,13 @@ class AsciiArtPlugin(NotesPlugin):
         entry_prompt.set_placeholder_text("e.g., Grim Reaper, Cyberpunk Dragon, Skull, Spaceship, Castle...")
         content_box.append(entry_prompt)
 
+        chk_online = Gtk.CheckButton(label="Search online archives first (asciiart.eu, ascii.co.uk, ascii-art.de)")
+        chk_online.set_active(True)
+        content_box.append(chk_online)
+
         dialog.set_extra_child(content_box)
         dialog.add_response("cancel", "Cancel")
-        dialog.add_response("generate", "Generate & Insert")
+        dialog.add_response("generate", "Generate / Search")
         dialog.set_response_appearance("generate", Adw.ResponseAppearance.SUGGESTED)
         dialog.set_default_response("generate")
 
@@ -528,22 +835,50 @@ class AsciiArtPlugin(NotesPlugin):
                     d.close()
                     return
 
-                if hasattr(window, "trigger_action_progress"):
-                    window.trigger_action_progress(1200)
+                if chk_online.get_active():
+                    window.set_status_message(f"🌐 Checking online archives for: \"{prompt}\"...")
+                    if hasattr(window, "trigger_action_progress"):
+                        window.trigger_action_progress(800)
 
-                window.set_status_message(f"🎨 Generating ASCII Art for: \"{prompt}\"...")
+                    def search_worker():
+                        matches = OnlineAsciiFetcher.search_all_sources(prompt)
+                        def on_search_done():
+                            if matches:
+                                window.set_status_message(f"🌐 Found {len(matches)} online artworks for '{prompt}'!")
+                                self.show_online_search_dialog(window, initial_query=prompt, preloaded_results=matches)
+                            else:
+                                window.set_status_message(f"🎨 No online matches found for '{prompt}'. Synthesizing via AI...")
+                                if hasattr(window, "trigger_action_progress"):
+                                    window.trigger_action_progress(1200)
 
-                def on_success(art_text: str, doc_name: str):
-                    self._insert_and_rename(window, art_text, doc_name)
+                                def on_success(art_text: str, doc_name: str):
+                                    self._insert_and_rename(window, art_text, doc_name)
 
-                def on_err(err_msg: str):
-                    window.set_status_message(f"❌ ASCII Generation Error: {err_msg}")
+                                def on_err(err_msg: str):
+                                    window.set_status_message(f"❌ ASCII Generation Error: {err_msg}")
 
-                AIPromptAsciiGenerator.generate_art(
-                    prompt=prompt,
-                    on_success_cb=on_success,
-                    on_error_cb=on_err
-                )
+                                AIPromptAsciiGenerator.generate_art(
+                                    prompt=prompt,
+                                    on_success_cb=on_success,
+                                    on_error_cb=on_err
+                                )
+                        GLib.idle_add(on_search_done)
+
+                    threading.Thread(target=search_worker, daemon=True).start()
+                else:
+                    if hasattr(window, "trigger_action_progress"):
+                        window.trigger_action_progress(1200)
+                    window.set_status_message(f"🎨 Generating ASCII Art for: \"{prompt}\"...")
+                    def on_success(art_text: str, doc_name: str):
+                        self._insert_and_rename(window, art_text, doc_name)
+                    def on_err(err_msg: str):
+                        window.set_status_message(f"❌ ASCII Generation Error: {err_msg}")
+
+                    AIPromptAsciiGenerator.generate_art(
+                        prompt=prompt,
+                        on_success_cb=on_success,
+                        on_error_cb=on_err
+                    )
             d.close()
 
         dialog.connect("response", on_response)
@@ -656,6 +991,7 @@ class AsciiArtPlugin(NotesPlugin):
 if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser(description="AI & Mathematical ASCII Art Generator")
+    parser.add_argument("--search", "-q", type=str, help="Search across online archives (asciiart.eu, ascii.co.uk, ascii-art.de)")
     parser.add_argument("--image", "-i", type=str, help="Path to input image")
     parser.add_argument("--prompt", "-p", type=str, help="Subject prompt to generate")
     parser.add_argument("--style", "-s", choices=["ascii", "braille", "block", "banner"], default="ascii")
@@ -663,7 +999,18 @@ if __name__ == "__main__":
     parser.add_argument("--invert", action="store_true", default=True, help="Invert for dark mode")
     args = parser.parse_args()
 
-    if args.image:
+    if args.search:
+        print(f"Searching online archives for '{args.search}'...")
+        results = OnlineAsciiFetcher.search_all_sources(args.search)
+        if not results:
+            print(f"No online matches found for '{args.search}'.")
+        else:
+            print(f"Found {len(results)} matches across online archives:\n")
+            for i, r in enumerate(results):
+                print(f"--- [Result {i+1} from {r['source']}] ({r['lines']} lines x {r['cols']} cols) ---")
+                print(r['art'])
+                print()
+    elif args.image:
         if args.style == "braille":
             print(AsciiArtEngine.image_to_braille(args.image, target_width=args.width, invert=args.invert))
         else:

@@ -955,6 +955,7 @@ class NotesWindow(Adw.ApplicationWindow):
             ("obsidian_manage_vaults", lambda *_: self.show_obsidian_vaults()),
             ("obsidian_choose_folder", lambda *_: self.choose_obsidian_folder()),
             ("ascii_art_generate", lambda *_: self.trigger_ascii_art()),
+            ("ascii_art_search", lambda *_: self.trigger_ascii_art_search()),
             ("show_plugins_manager", lambda *_: self.plugin_manager.show_manager_dialog()),
             ("open_plugins_folder", lambda *_: self.open_plugins_folder()),
         ]
@@ -1262,6 +1263,11 @@ class NotesWindow(Adw.ApplicationWindow):
         # Hotkey: Ctrl+Alt+I -> Generate ASCII Art
         if ctrl and alt and keyval in (Gdk.KEY_i, Gdk.KEY_I):
             self.trigger_ascii_art()
+            return True
+
+        # Hotkey: Ctrl+Shift+I -> Search Online ASCII Art Archives
+        if ctrl and shift and keyval in (Gdk.KEY_i, Gdk.KEY_I):
+            self.trigger_ascii_art_search()
             return True
 
         # Hotkey: Ctrl+Alt+O -> Push Note to Obsidian Vault
@@ -1611,6 +1617,14 @@ class NotesWindow(Adw.ApplicationWindow):
         else:
             self.set_status_message("⚠️ ASCII Art plugin is not loaded.")
 
+    def trigger_ascii_art_search(self):
+        """Presents online ASCII art search dialog across archives."""
+        ascii_plug = self.plugin_manager.get_plugin("ascii_art")
+        if ascii_plug and ascii_plug.enabled:
+            ascii_plug.show_online_search_dialog(self)
+        else:
+            self.set_status_message("⚠️ ASCII Art plugin is not loaded.")
+
     def _legacy_ai_prompt(self):
         page = self.get_current_page()
         if not page:
@@ -1754,6 +1768,8 @@ class NotesWindow(Adw.ApplicationWindow):
                 "• Tab / Right : Accept Ghost-Text Suggestion\n"
                 "• Ctrl+Alt+V / F9 : Real-Time Voice Dictation (Esc to cancel)\n"
                 "• Ctrl+Alt+A : AI Assistant Prompt\n"
+                "• Ctrl+Alt+I : Generate AI ASCII Art\n"
+                "• Ctrl+Shift+I : Search Online ASCII Art Archives\n"
                 "• Ctrl++ / Ctrl+- : Zoom In / Out\n"
                 "• Ctrl+0 : Reset Zoom"
             )
