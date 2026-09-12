@@ -72,7 +72,8 @@ class ObsidianPlugin(NotesPlugin):
             return
 
         content = page.get_full_text()
-        title = page.title if page.title and page.title != "Untitled Note" else ""
+        raw_title = page.get_title() if hasattr(page, "get_title") else getattr(page, "title", "")
+        title = "" if "Untitled" in str(raw_title) else str(raw_title)
         if not content.strip():
             note_title = title or "Untitled Note"
             content = create_obsidian_template(note_title)

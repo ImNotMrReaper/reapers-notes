@@ -96,7 +96,7 @@ class AIAssistantPlugin(NotesPlugin):
         dialog.set_close_response("cancel")
 
         page = window.get_current_page()
-        file_title = page.filepath if page and page.filepath else (page.title if page and page.title else "Untitled Note")
+        file_title = page.filepath if page and page.filepath else (page.get_title() if page and hasattr(page, "get_title") else "Untitled Note")
 
         def on_response(dlg, response):
             if response == "generate":

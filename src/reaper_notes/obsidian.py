@@ -317,17 +317,14 @@ def push_to_obsidian(content: str, title: str = "", vault_path: str = None) -> t
         encoded_file = urllib.parse.quote(rel_path)
         uri = f"obsidian://open?vault={encoded_vault}&file={encoded_file}"
         
-        # 1. Try URI handler first
-        subprocess.Popen(["xdg-open", uri], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-
-        # 2. Fallback to direct app launch if xdg-open doesn't open
-        if shutil.which("obsidian"):
-            subprocess.Popen(["obsidian", str(target_file)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        elif os.path.exists("/snap/bin/obsidian"):
-            subprocess.Popen(["/snap/bin/obsidian", str(target_file)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        elif shutil.which("flatpak"):
-            subprocess.Popen(["flatpak", "run", "md.obsidian.Obsidian", str(target_file)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    except Exception:
-        pass
+        # Launch Obsidian via installed binary or URI
+        if os.path.exists("/snap/bin/obsidian"):
+            subprocess.Popen(["/snap/bin/obsidian", uri], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        elif shutil.which("obsidian"):
+            subprocess.Popen(["obsidian", uri], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        else:
+            subprocess.Popen(["xdg-open", uri], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except Exception as e:
+        print(f"Failed to launch Obsidian: {e}", file=sys.stderr)
 
     return True, str(target_file)

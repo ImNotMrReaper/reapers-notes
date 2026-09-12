@@ -430,6 +430,14 @@ class EditorPage(Gtk.Box):
 
         return full_text
 
+    @property
+    def title(self) -> str:
+        return self.get_title()
+
+    @title.setter
+    def title(self, value: str):
+        self.default_title = value
+
     def get_title(self) -> str:
         if self.filepath:
             return Path(self.filepath).name
@@ -824,6 +832,12 @@ class NotesWindow(Adw.ApplicationWindow):
         self.btn_ai.connect("clicked", lambda _: self.trigger_ai_prompt())
         right_box.append(self.btn_ai)
 
+        self.btn_ascii = Gtk.Button.new_from_icon_name("applications-graphics-symbolic")
+        self.btn_ascii.set_tooltip_text("ASCII Art Archives & AI Synthesis (Ctrl+Shift+I / Ctrl+Alt+I)")
+        self.btn_ascii.add_css_class("header-action-btn")
+        self.btn_ascii.connect("clicked", lambda _: self.trigger_ascii_art_search())
+        right_box.append(self.btn_ascii)
+
         self.btn_obsidian = Gtk.Button.new_from_icon_name("document-send-symbolic")
         self.btn_obsidian.set_tooltip_text("Push Note to Obsidian Vault (Ctrl+Alt+O)")
         self.btn_obsidian.add_css_class("header-action-btn")
@@ -846,6 +860,12 @@ class NotesWindow(Adw.ApplicationWindow):
         menu.append("New Window", "win.new_window")
         menu.append("Save As...", "win.save_as")
         menu.append("Find and Replace...", "win.find_replace")
+
+        # ASCII Art Integration
+        ascii_section = Gio.Menu()
+        ascii_section.append("Search Online ASCII Archives... (Ctrl+Shift+I)", "win.ascii_art_search")
+        ascii_section.append("Generate AI ASCII Art... (Ctrl+Alt+I)", "win.ascii_art_generate")
+        menu.append_section("ASCII Art", ascii_section)
 
         # Obsidian Vault Integration
         obsidian_section = Gio.Menu()
@@ -989,13 +1009,58 @@ class NotesWindow(Adw.ApplicationWindow):
 
         GLib.timeout_add(interval, on_step)
 
+    def _save_page_immediately(self, page: EditorPage) -> bool:
+        """Saves a modified page immediately without blocking async modal stalls."""
+        clean_text = page.get_clean_text()
+        if not clean_text.strip():
+            page.is_modified = False
+            return True
+
+        if not page.filepath:
+            first_line = ""
+            for line in clean_text.splitlines():
+                s = line.strip().lstrip("#").strip()
+                if s:
+                    first_line = s
+                    break
+            safe_name = "".join(c for c in (first_line or "Note") if c.isalnum() or c in (" ", "-", "_")).strip()
+            if not safe_name:
+                safe_name = f"Note_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+
+            ext = ".locked" if page.is_locked else ".txt"
+            target_dir = LOCKED_NOTES_DIR if page.is_locked else DEFAULT_NOTES_DIR
+            target_dir.mkdir(parents=True, exist_ok=True)
+
+            candidate = target_dir / f"{safe_name}{ext}"
+            counter = 1
+            while candidate.exists():
+                candidate = target_dir / f"{safe_name}_{counter}{ext}"
+                counter += 1
+            page.filepath = str(candidate)
+
+        path = Path(page.filepath)
+        try:
+            if page.is_locked:
+                payload = encrypt_note(clean_text)
+                with open(path, "wb") as f:
+                    f.write(payload)
+            else:
+                with open(path, "w", encoding="utf-8") as f:
+                    f.write(clean_text)
+            page.is_modified = False
+            self.update_tab_title(page)
+            return True
+        except Exception as e:
+            print(f"Error auto-saving note {path}: {e}", file=sys.stderr)
+            return False
+
     def _on_window_close_requested(self, window):
         """Checks for modified/unsaved tabs before allowing the window to close."""
         modified_pages = []
         for i in range(self.tab_view.get_n_pages()):
             adw_page = self.tab_view.get_nth_page(i)
             child = adw_page.get_child()
-            if child and child.is_modified:
+            if child and child.is_modified and len(child.get_clean_text().strip()) > 0:
                 modified_pages.append((adw_page, child))
 
         if not modified_pages:
@@ -1022,11 +1087,12 @@ class NotesWindow(Adw.ApplicationWindow):
 
         def on_response(d, response):
             if response == "save":
-                for adw_page, page in modified_pages:
-                    self.tab_view.set_selected_page(adw_page)
-                    self.on_action_save()
+                for _, page in modified_pages:
+                    self._save_page_immediately(page)
                 self.destroy()
             elif response == "discard":
+                for _, page in modified_pages:
+                    page.is_modified = False
                 self.destroy()
 
         dialog.connect("response", on_response)
@@ -1115,7 +1181,7 @@ class NotesWindow(Adw.ApplicationWindow):
 
     def _on_close_page_requested(self, tab_view, adw_page):
         page = adw_page.get_child()
-        if page.is_modified:
+        if page and page.is_modified and len(page.get_clean_text().strip()) > 0:
             dialog = Adw.MessageDialog(
                 transient_for=self,
                 heading=f'Save changes to "{page.get_title()}"?',
@@ -1129,9 +1195,10 @@ class NotesWindow(Adw.ApplicationWindow):
 
             def on_response(d, response):
                 if response == "save":
-                    self.on_action_save()
+                    self._save_page_immediately(page)
                     tab_view.close_page_finish(adw_page, True)
                 elif response == "discard":
+                    page.is_modified = False
                     tab_view.close_page_finish(adw_page, True)
                 else:
                     tab_view.close_page_finish(adw_page, False)
@@ -1705,7 +1772,8 @@ class NotesWindow(Adw.ApplicationWindow):
             if not content.strip():
                 self.set_status_message("⚠️ Note is empty.")
                 return
-            title = page.title if page.title and page.title != "Untitled Note" else ""
+            raw_title = page.get_title()
+            title = "" if "Untitled" in raw_title else raw_title
             default_vault = get_default_vault()
             if default_vault:
                 vault_name, vault_path = default_vault
