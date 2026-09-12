@@ -234,20 +234,93 @@ def register_custom_vault(folder_path: str) -> tuple[bool, str]:
         return False, f"Error updating settings: {e}"
 
 
-def create_obsidian_template(title: str) -> str:
-    """Generates standard Obsidian Markdown with YAML frontmatter."""
+def has_frontmatter(content: str) -> bool:
+    """Checks whether the markdown string already starts with a complete YAML frontmatter block."""
+    stripped = content.lstrip()
+    if not stripped.startswith("---"):
+        return False
+    lines = stripped.splitlines()
+    if len(lines) < 2:
+        return False
+    for line in lines[1:]:
+        if line.strip() == "---":
+            return True
+    return False
+
+
+def generate_frontmatter(title: str, tags: list[str] = None) -> str:
+    """Generates standard, clean YAML frontmatter for Obsidian."""
     clean_title = title.strip() or "Untitled Note"
     now_str = datetime.now().strftime("%Y-%m-%d %H:%M")
+    tag_list = tags or ["notes"]
+    tag_lines = "\n".join(f"  - {t}" for t in tag_list)
     return f"""---
-title: {clean_title}
+title: "{clean_title}"
 date: {now_str}
 tags:
-  - notes
----
+{tag_lines}
+---"""
+
+
+def create_obsidian_template(title: str) -> str:
+    """Generates an elegant, structured Obsidian Markdown document with YAML frontmatter."""
+    clean_title = title.strip() or "Untitled Note"
+    fm = generate_frontmatter(clean_title)
+    return f"""{fm}
 
 # {clean_title}
 
 """
+
+
+def extract_note_title(content: str, fallback_title: str = "") -> str:
+    """Extracts a clean, safe note title from YAML frontmatter, Markdown H1 headers, or fallback."""
+    clean = fallback_title.strip()
+    if clean.endswith(".txt") or clean.endswith(".md"):
+        clean = Path(clean).stem
+
+    if clean and not clean.startswith("Untitled") and any(c.isalnum() for c in clean):
+        return clean
+
+    in_frontmatter = False
+    for line in content.splitlines():
+        line_s = line.strip()
+        if line_s.startswith("---"):
+            if not in_frontmatter:
+                in_frontmatter = True
+                continue
+            else:
+                in_frontmatter = False
+                break
+        if in_frontmatter and line_s.startswith("title:"):
+            cand = line_s.split("title:", 1)[1].strip().strip("\"'").strip()
+            if cand and any(c.isalnum() for c in cand):
+                return cand
+
+    for line in content.splitlines():
+        line_s = line.strip()
+        if line_s.startswith("# "):
+            cand = line_s[2:].strip()
+            if cand and any(c.isalnum() for c in cand):
+                return cand
+
+    for line in content.splitlines():
+        line_s = line.strip()
+        if line_s and not line_s.startswith("---") and any(c.isalnum() for c in line_s):
+            words = line_s.split()[:6]
+            cand = " ".join(words)
+            if cand and any(c.isalnum() for c in cand):
+                return cand
+
+    return f"Note_{datetime.now().strftime('%Y-%m-%d_%H%M%S')}"
+
+
+def sanitize_filename(name: str) -> str:
+    """Ensures filename contains valid characters and at least one alphanumeric character."""
+    safe = "".join(c for c in name if c.isalnum() or c in (" ", "-", "_")).strip()
+    if not safe or not any(c.isalnum() for c in safe):
+        safe = f"Note_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+    return safe
 
 
 def push_to_obsidian(content: str, title: str = "", vault_path: str = None) -> tuple[bool, str]:
@@ -280,27 +353,23 @@ def push_to_obsidian(content: str, title: str = "", vault_path: str = None) -> t
         except Exception:
             pass
 
-    clean_title = title.strip()
-    if clean_title.endswith(".txt") or clean_title.endswith(".md"):
-        clean_title = Path(clean_title).stem
+    raw_title = extract_note_title(content, title)
+    safe_title = sanitize_filename(raw_title)
 
-    if not clean_title or "Untitled" in clean_title:
-        for line in content.splitlines():
-            line_s = line.strip()
-            if line_s.startswith("# "):
-                clean_title = line_s[2:].strip()
-                break
-        if not clean_title or "Untitled" in clean_title:
-            clean_title = f"Note_{datetime.now().strftime('%Y-%m-%d_%H%M%S')}"
+    # Format content with frontmatter and title cleanly
+    if not has_frontmatter(content):
+        fm = generate_frontmatter(safe_title)
+        content_stripped = content.strip()
 
-    safe_title = "".join(c for c in clean_title if c.isalnum() or c in (" ", "-", "_")).strip()
-    if not safe_title:
-        safe_title = f"Note_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
-
-    # Ensure document has frontmatter
-    if not content.lstrip().startswith("---"):
-        frontmatter = create_obsidian_template(safe_title)
-        content = frontmatter + "\n" + content
+        has_h1 = any(line.strip().startswith("# ") for line in content_stripped.splitlines())
+        if not has_h1 and content_stripped:
+            content = f"{fm}\n\n# {safe_title}\n\n{content_stripped}\n"
+        elif has_h1:
+            content = f"{fm}\n\n{content_stripped}\n"
+        else:
+            content = f"{fm}\n\n# {safe_title}\n\n"
+    else:
+        content = content.strip() + "\n"
 
     target_file = vault_dir / f"{safe_title}.md"
     if safe_title.startswith("Note_") or "Untitled" in title:
@@ -320,13 +389,14 @@ def push_to_obsidian(content: str, title: str = "", vault_path: str = None) -> t
         encoded_path = urllib.parse.quote(str(target_file.resolve()))
         uri = f"obsidian://open?path={encoded_path}"
         
-        # Launch Obsidian via installed binary or URI
-        if os.path.exists("/snap/bin/obsidian"):
-            subprocess.Popen(["/snap/bin/obsidian", uri], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        elif shutil.which("obsidian"):
-            subprocess.Popen(["obsidian", uri], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        else:
-            subprocess.Popen(["xdg-open", uri], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        # Native, non-blocking desktop URI launch via GIO / Wayland
+        try:
+            import gi
+            gi.require_version("Gio", "2.0")
+            from gi.repository import Gio
+            Gio.AppInfo.launch_default_for_uri(uri, None)
+        except Exception:
+            subprocess.Popen(["xdg-open", uri], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
     except Exception as e:
         print(f"Failed to launch Obsidian: {e}", file=sys.stderr)
 

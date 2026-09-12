@@ -1835,6 +1835,8 @@ class NotesWindow(Adw.ApplicationWindow):
             template = create_obsidian_template("New Obsidian Note")
             page.buffer.set_text(template)
             page.set_language_by_id("markdown")
+            page.default_title = "New Obsidian Note.md"
+            self.update_tab_title(page)
             self.set_status_message("🟣 Created new Obsidian note.")
 
     def show_obsidian_vaults(self):

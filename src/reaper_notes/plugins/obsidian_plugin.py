@@ -123,6 +123,9 @@ class ObsidianPlugin(NotesPlugin):
                 page = window.open_new_tab()
                 page.buffer.set_text(template)
                 page.set_language_by_id("markdown")
+                page.default_title = f"{note_title}.md"
+                if hasattr(window, "update_tab_title"):
+                    window.update_tab_title(page)
                 window.set_status_message(f"🟣 Created new Obsidian note: '{note_title}'")
             dlg.close()
 
