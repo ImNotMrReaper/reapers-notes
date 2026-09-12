@@ -69,11 +69,12 @@ class ObsidianPlugin(NotesPlugin):
             return
 
         content = page.get_full_text()
-        if not content.strip():
-            window.set_status_message("⚠️ Note is empty. Nothing to push.")
-            return
-
         title = page.title if page.title and page.title != "Untitled Note" else ""
+        if not content.strip():
+            note_title = title or "Untitled Note"
+            content = create_obsidian_template(note_title)
+            page.buffer.set_text(content)
+
         default_vault = get_default_vault()
         if not default_vault:
             # Prompt user to choose or pick via file manager
@@ -83,7 +84,7 @@ class ObsidianPlugin(NotesPlugin):
         vault_name, vault_path = default_vault
         success, res = push_to_obsidian(content, title, vault_path)
         if success:
-            window.set_status_message(f"🟣 Note pushed to Obsidian: {vault_name}/{res.split('/')[-1]}")
+            window.set_status_message(f"🟣 Note pushed to Obsidian: {vault_name}/{os.path.basename(res)}")
         else:
             window.set_status_message(f"❌ Failed to push note: {res}")
 
@@ -111,10 +112,11 @@ class ObsidianPlugin(NotesPlugin):
             if response == "create":
                 note_title = entry.get_text().strip() or "Untitled Note"
                 template = create_obsidian_template(note_title)
-                page = window.create_new_page(title=note_title)
+                page = window.open_new_tab()
                 page.buffer.set_text(template)
                 page.set_language_by_id("markdown")
                 window.set_status_message(f"🟣 Created new Obsidian note: '{note_title}'")
+            dlg.close()
 
         dialog.connect("response", on_response)
         entry.connect("activate", lambda _: dialog.response("create"))

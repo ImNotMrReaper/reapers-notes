@@ -52,8 +52,8 @@
   <style name="secondary-cursor"      foreground="ubuntu_purple"/>
   <style name="selection"             background="selection_bg" foreground="foreground_pure"/>
   <style name="selection-unfocused"   background="oled_border" foreground="foreground_pure"/>
-  <style name="current-line"          background="oled_highlight"/>
-  <style name="current-line-number"   background="oled_highlight" foreground="ubuntu_purple_lt" bold="true"/>
+  <style name="current-line"          background="pure_black"/>
+  <style name="current-line-number"   background="pure_black" foreground="ubuntu_purple_lt"/>
   <style name="line-numbers"          background="pure_black" foreground="foreground_faint"/>
   <style name="bracket-match"         background="oled_border" foreground="ubuntu_purple_lt" bold="true"/>
   <style name="bracket-mismatch"      background="dracula_red" foreground="pure_black" bold="true"/>

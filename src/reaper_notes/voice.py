@@ -13,6 +13,7 @@ import struct
 import threading
 import subprocess
 import re
+import array
 import ctypes
 from pathlib import Path
 from gi.repository import GLib
@@ -60,7 +61,7 @@ class WhisperEngine:
         self.lib = None
         self.ctx = None
         self.model_path = None
-        self._lock = threading.Lock()
+        self._lock = threading.RLock()
         self._load_library()
 
     def _load_library(self):
@@ -82,7 +83,7 @@ class WhisperEngine:
 
             self.lib.easy_transcribe.argtypes = [
                 ctypes.c_void_p,
-                ctypes.POINTER(ctypes.c_float),
+                ctypes.c_void_p,
                 ctypes.c_int,
                 ctypes.c_int,
                 ctypes.c_char_p
@@ -125,14 +126,14 @@ class WhisperEngine:
                 return ""
 
             try:
-                float_samples = [s / 32768.0 for s in samples_int16]
-                c_floats = (ctypes.c_float * len(float_samples))(*float_samples)
+                floats_arr = array.array('f', (s / 32768.0 for s in samples_int16))
+                buf_addr, buf_len = floats_arr.buffer_info()
                 c_prompt = prompt.encode("utf-8") if prompt else b""
 
                 ptr = self.lib.easy_transcribe(
                     self.ctx,
-                    c_floats,
-                    len(float_samples),
+                    buf_addr,
+                    buf_len,
                     n_threads,
                     c_prompt
                 )
@@ -230,8 +231,10 @@ class VoiceDictationManager:
         chunk_samples = 1600  # 100ms
         chunk_bytes = chunk_samples * 2  # 16-bit signed PCM
         min_sentence_samples = int(0.6 * sample_rate)  # at least 600ms before transcribing
-        max_sentence_samples = int(3.5 * sample_rate)  # auto-commit long sentence at 3.5s
-        energy_threshold = 400.0  # speech activity threshold
+        max_sentence_samples = int(4.0 * sample_rate)  # auto-commit long sentence at 4.0s
+        ambient_rms = 400.0
+        calibrated_chunks = 0
+        last_partial_len = 0
 
         try:
             while not self._cancel_flag:
@@ -244,16 +247,25 @@ class VoiceDictationManager:
 
                 num_samples = len(raw_data) // 2
                 samples = struct.unpack(f"<{num_samples}h", raw_data)
-                
+
                 # Compute RMS energy
                 sum_sq = sum(s * s for s in samples)
                 rms = math.sqrt(sum_sq / num_samples) if num_samples > 0 else 0.0
 
-                if rms > energy_threshold:
+                if calibrated_chunks < 4:
+                    ambient_rms = (ambient_rms * calibrated_chunks + rms) / (calibrated_chunks + 1)
+                    calibrated_chunks += 1
+                    continue
+
+                threshold = max(450.0, ambient_rms * 1.8 + 250.0)
+
+                if rms > threshold:
                     speech_detected_in_sentence = True
                     silence_count = 0
                 else:
                     silence_count += 1
+                    if not speech_detected_in_sentence:
+                        ambient_rms = ambient_rms * 0.92 + rms * 0.08
 
                 # If speech has started in this phrase, keep accumulating
                 if speech_detected_in_sentence:
@@ -273,9 +285,11 @@ class VoiceDictationManager:
                         accumulated_sentence = []
                         speech_detected_in_sentence = False
                         silence_count = 0
+                        last_partial_len = 0
 
-                    # Condition B: Continuous speech streaming (every 1.5s while talking)
-                    elif len(accumulated_sentence) >= int(1.5 * sample_rate):
+                    # Condition B: Streaming partial feedback (every ~0.9s of speech)
+                    elif (len(accumulated_sentence) - last_partial_len) >= int(0.9 * sample_rate):
+                        last_partial_len = len(accumulated_sentence)
                         text = self.engine.transcribe_samples(
                             accumulated_sentence,
                             prompt=last_context_prompt
@@ -283,13 +297,19 @@ class VoiceDictationManager:
                         if text:
                             GLib.idle_add(on_partial_cb, text, False)
 
-                        # If sentence gets too long (>= 3.5s), commit and reset
-                        if len(accumulated_sentence) >= max_sentence_samples:
-                            if text:
-                                last_context_prompt = text[-40:]
-                                GLib.idle_add(on_partial_cb, text, True)
-                            accumulated_sentence = []
-                            speech_detected_in_sentence = False
+                    # Condition C: Long sentence auto-commit (>= 4.0s continuous)
+                    if len(accumulated_sentence) >= max_sentence_samples:
+                        text = self.engine.transcribe_samples(
+                            accumulated_sentence,
+                            prompt=last_context_prompt
+                        )
+                        if text:
+                            last_context_prompt = text[-40:]
+                            GLib.idle_add(on_partial_cb, text, True)
+                        accumulated_sentence = []
+                        speech_detected_in_sentence = False
+                        silence_count = 0
+                        last_partial_len = 0
 
         except Exception as e:
             print(f"[Voice Worker] Streaming loop error: {e}", file=sys.stderr)
@@ -318,7 +338,6 @@ class VoiceDictationManager:
             if not self.is_recording:
                 return
             self._stop_flag = True
-            self.is_recording.set(False)
             self._cleanup_process()
 
     def cancel_streaming(self):

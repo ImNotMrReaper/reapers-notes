@@ -251,14 +251,18 @@ tags:
 
 def push_to_obsidian(content: str, title: str = "", vault_path: str = None) -> tuple[bool, str]:
     """
-    Saves the content into the specified Obsidian vault.
+    Saves the content into the specified Obsidian vault and opens it in Obsidian.
     Returns (success: bool, message_or_filepath: str).
     """
+    import shutil
     if not vault_path:
         default_vault = get_default_vault()
         if not default_vault:
-            return False, "No Obsidian vault found on this system."
-        vault_path = default_vault[1]
+            fallback_dir = Path.home() / "Documents" / "Obsidian Vault"
+            register_custom_vault(str(fallback_dir))
+            vault_path = str(fallback_dir)
+        else:
+            vault_path = default_vault[1]
 
     vault_dir = Path(vault_path)
     if not vault_dir.exists():
@@ -267,19 +271,32 @@ def push_to_obsidian(content: str, title: str = "", vault_path: str = None) -> t
         except Exception as e:
             return False, f"Failed to create vault directory: {e}"
 
+    # Ensure .obsidian marker exists so Obsidian sees this folder as a vault
+    obsidian_marker = vault_dir / ".obsidian"
+    if not obsidian_marker.exists():
+        try:
+            obsidian_marker.mkdir(parents=True, exist_ok=True)
+        except Exception:
+            pass
+
     clean_title = title.strip()
-    if not clean_title:
+    if not clean_title or clean_title == "Untitled Note":
         for line in content.splitlines():
             line_s = line.strip()
             if line_s.startswith("# "):
                 clean_title = line_s[2:].strip()
                 break
-        if not clean_title:
-            clean_title = f"Note {datetime.now().strftime('%Y-%m-%d %H%M%S')}"
+        if not clean_title or clean_title == "Untitled Note":
+            clean_title = f"Note_{datetime.now().strftime('%Y-%m-%d_%H%M%S')}"
 
     safe_title = "".join(c for c in clean_title if c.isalnum() or c in (" ", "-", "_")).strip()
     if not safe_title:
         safe_title = f"Note_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+
+    # Ensure document has frontmatter
+    if not content.lstrip().startswith("---"):
+        frontmatter = create_obsidian_template(safe_title)
+        content = frontmatter + "\n" + content
 
     target_file = vault_dir / f"{safe_title}.md"
     counter = 1
@@ -299,7 +316,17 @@ def push_to_obsidian(content: str, title: str = "", vault_path: str = None) -> t
         encoded_vault = urllib.parse.quote(vault_name)
         encoded_file = urllib.parse.quote(rel_path)
         uri = f"obsidian://open?vault={encoded_vault}&file={encoded_file}"
+        
+        # 1. Try URI handler first
         subprocess.Popen(["xdg-open", uri], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+        # 2. Fallback to direct app launch if xdg-open doesn't open
+        if shutil.which("obsidian"):
+            subprocess.Popen(["obsidian", str(target_file)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        elif os.path.exists("/snap/bin/obsidian"):
+            subprocess.Popen(["/snap/bin/obsidian", str(target_file)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        elif shutil.which("flatpak"):
+            subprocess.Popen(["flatpak", "run", "md.obsidian.Obsidian", str(target_file)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     except Exception:
         pass
 

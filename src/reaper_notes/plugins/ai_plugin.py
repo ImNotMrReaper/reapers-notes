@@ -95,18 +95,23 @@ class AIAssistantPlugin(NotesPlugin):
         dialog.set_default_response("generate")
         dialog.set_close_response("cancel")
 
+        page = window.get_current_page()
+        file_title = page.filepath if page and page.filepath else (page.title if page and page.title else "Untitled Note")
+
         def on_response(dlg, response):
             if response == "generate":
                 prompt_text = entry.get_text().strip()
                 if not prompt_text:
                     window.set_status_message("⚠️ Prompt cannot be empty.")
+                    dlg.close()
                     return
                 provider = self.get_active_provider()
                 window.btn_ai.add_css_class("ai-btn-thinking")
                 window.set_status_message(f"🤖 AI ({provider.capitalize()}) thinking: \"{prompt_text[:30]}...\"")
-                self.dispatch_prompt(prompt_text, lambda res: self._on_ai_completed(window, res))
+                self.dispatch_prompt(prompt_text, file_title, lambda res: self._on_ai_completed(window, res))
             else:
                 window.set_status_message("AI prompt canceled.")
+            dlg.close()
 
         dialog.connect("response", on_response)
         entry.connect("activate", lambda _: dialog.response("generate"))
@@ -127,9 +132,16 @@ class AIAssistantPlugin(NotesPlugin):
         else:
             window.set_status_message("⚠️ AI returned an empty response.")
 
-    def dispatch_prompt(self, prompt: str, on_complete_cb: Callable[[str], None]):
+    def dispatch_prompt(self, prompt: str, file_title: str, on_complete_cb: Callable[[str], None]):
         """Executes prompt against the configured provider asynchronously."""
         provider = self.get_active_provider()
+
+        import sys
+        print(f"\n--- [Reaper's Notes AI Prompt Execution] ---", flush=True)
+        print(f"Current File: {file_title}", flush=True)
+        print(f"Prompt: {prompt}\n", flush=True)
+
+        contextual_prompt = f"[Current File: {file_title}]\n{prompt}"
 
         def worker():
             if not prompt or not prompt.strip():
@@ -139,19 +151,20 @@ class AIAssistantPlugin(NotesPlugin):
             result = ""
             try:
                 if provider == "antigravity":
-                    result = self._call_antigravity(prompt)
+                    result = self._call_antigravity(contextual_prompt)
                 elif provider == "claude":
-                    result = self._call_claude(prompt)
+                    result = self._call_claude(contextual_prompt)
                 elif provider == "ollama":
-                    result = self._call_ollama(prompt)
+                    result = self._call_ollama(contextual_prompt)
                 elif provider == "openai":
-                    result = self._call_openai(prompt)
+                    result = self._call_openai(contextual_prompt)
                 else:
                     # Default fallback to Antigravity
-                    result = self._call_antigravity(prompt)
+                    result = self._call_antigravity(contextual_prompt)
             except Exception as e:
                 result = f"[{provider.capitalize()} Error]: {e}"
 
+            print(f"--- [AI Execution Result] ---\n{result}\n---------------------------------------------\n", flush=True)
             GLib.idle_add(on_complete_cb, result)
 
         threading.Thread(target=worker, daemon=True).start()

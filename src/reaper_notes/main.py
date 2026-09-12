@@ -155,8 +155,8 @@ class EditorPage(Gtk.Box):
         self.editor.add_css_class("notes-editor")
         self.editor.set_wrap_mode(Gtk.WrapMode.WORD_CHAR if get_setting("word_wrap", True) else Gtk.WrapMode.NONE)
         self.editor.set_monospace(True)
-        self.editor.set_show_line_numbers(get_setting("line_numbers", True))
-        self.editor.set_highlight_current_line(True)
+        self.editor.set_show_line_numbers(get_setting("line_numbers", False))
+        self.editor.set_highlight_current_line(get_setting("highlight_current_line", False))
         self.editor.set_show_right_margin(get_setting("right_margin", False))
         self.editor.set_right_margin_position(80)
         self.editor.set_left_margin(20)
@@ -181,7 +181,13 @@ class EditorPage(Gtk.Box):
 
     def _connect_signals(self):
         self.buffer.connect("changed", self._on_buffer_changed)
-        self.buffer.connect("notify::cursor-position", lambda *_: self.window.update_status_bar())
+        self.buffer.connect("notify::cursor-position", self._on_cursor_position_changed)
+
+    def _on_cursor_position_changed(self, *args):
+        self.window.update_status_bar()
+        if self.voice_sentence_mark and self.voice_pending_len == 0:
+            insert_iter = self.buffer.get_iter_at_mark(self.buffer.get_insert())
+            self.buffer.move_mark(self.voice_sentence_mark, insert_iter)
 
     def _on_occurrences_count_changed(self, context, param):
         count = context.get_occurrences_count()
@@ -804,6 +810,7 @@ class NotesWindow(Adw.ApplicationWindow):
         self.btn_voice = Gtk.Button.new_from_icon_name("audio-input-microphone-symbolic")
         self.btn_voice.set_tooltip_text("Local Whisper Dictation (Ctrl+Alt+V)")
         self.btn_voice.add_css_class("header-action-btn")
+        self.btn_voice.set_focusable(False)
         self.btn_voice.connect("clicked", lambda _: self.toggle_voice_dictation())
         right_box.append(self.btn_voice)
 
@@ -1083,6 +1090,7 @@ class NotesWindow(Adw.ApplicationWindow):
         if not page:
             return
         page.set_language_by_id(lang_id)
+        set_setting("default_language", lang_id)
         self.update_tab_title(page)
         self.update_status_bar()
         self.set_status_message(f"Language set to: {lang_name}")
@@ -1412,6 +1420,7 @@ class NotesWindow(Adw.ApplicationWindow):
 
         if not self.voice_mgr.is_active():
             page.start_voice_stream()
+            page.editor.grab_focus()
             success = self.voice_mgr.start_streaming(
                 on_partial_cb=self._on_voice_partial,
                 on_complete_cb=self._on_voice_complete,
@@ -1431,11 +1440,8 @@ class NotesWindow(Adw.ApplicationWindow):
         self.btn_voice.remove_css_class("voice-btn-recording")
         self.btn_voice.set_icon_name("audio-input-microphone-symbolic")
         self.btn_voice.set_tooltip_text("Local Whisper Dictation (Ctrl+Alt+V / F9)")
+        self.set_status_message("🎙️ Finalizing dictation...")
         self.voice_mgr.stop_streaming()
-        page = self.get_current_page()
-        if page:
-            page.finalize_voice_stream()
-        self.set_status_message("✅ Voice dictation completed.")
 
     def cancel_voice_dictation(self):
         self.btn_voice.remove_css_class("voice-btn-recording")
@@ -1462,7 +1468,8 @@ class NotesWindow(Adw.ApplicationWindow):
         page = self.get_current_page()
         if page:
             page.finalize_voice_stream()
-        self.set_status_message("✅ Voice dictation ready.")
+            page.editor.grab_focus()
+        self.set_status_message("✅ Voice dictation completed.")
 
     def _on_voice_error(self, err_msg: str):
         self.btn_voice.remove_css_class("voice-btn-recording")

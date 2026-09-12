@@ -11,7 +11,8 @@ SETTINGS_FILE = CONFIG_DIR / "settings.json"
 DEFAULT_SETTINGS = {
     "theme_mode": "system",  # "system", "oled", "dark", "light"
     "font_size": 13,
-    "line_numbers": True,
+    "line_numbers": False,
+    "highlight_current_line": False,
     "word_wrap": True,
     "right_margin": False,
     "default_language": "markdown",
