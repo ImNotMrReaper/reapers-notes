@@ -1,11 +1,21 @@
 """
 autocomplete.py: Advanced Inline Predictive Autocomplete & Fuzzy Spellcheck / Autocorrect Engine.
-Provides sub-millisecond prefix trie matching, document vocabulary indexing, and Levenshtein fuzzy autocorrect.
+Provides sub-millisecond prefix trie matching, persistent user word frequency database,
+document vocabulary indexing, and Levenshtein fuzzy autocorrect.
 """
 
+import os
 import re
+import sys
+import time
+import sqlite3
 import difflib
-from typing import Optional, List, Set, Dict
+from pathlib import Path
+from typing import Optional, List, Set, Dict, Tuple
+
+CONFIG_DIR = Path.home() / ".config" / "reaper-notes"
+VOCAB_DB_PATH = CONFIG_DIR / "user_vocabulary.db"
+DEFAULT_NOTES_DIR = Path.home() / "Documents" / "Notes"
 
 COMMON_KEYWORDS = [
     # Python Keywords & Builtins
@@ -96,16 +106,143 @@ TYPO_CORRECTIONS: Dict[str, str] = {
 }
 
 
+class UserVocabularyDatabase:
+    """
+    SQLite-backed persistent database of word frequencies.
+    Learns and prioritizes words the user types, accepts, and saves across sessions.
+    """
+    def __init__(self, db_path: Path = VOCAB_DB_PATH):
+        self.db_path = db_path
+        self._init_db()
+
+    def _get_connection(self) -> sqlite3.Connection:
+        self.db_path.parent.mkdir(parents=True, exist_ok=True)
+        conn = sqlite3.connect(str(self.db_path), timeout=5.0)
+        conn.execute("PRAGMA journal_mode=WAL;")
+        conn.execute("PRAGMA synchronous=NORMAL;")
+        return conn
+
+    def _init_db(self):
+        try:
+            with self._get_connection() as conn:
+                conn.execute("""
+                    CREATE TABLE IF NOT EXISTS word_frequencies (
+                        word TEXT PRIMARY KEY,
+                        frequency INTEGER NOT NULL DEFAULT 1,
+                        last_used REAL NOT NULL
+                    );
+                """)
+                conn.execute("""
+                    CREATE INDEX IF NOT EXISTS idx_word_prefix ON word_frequencies(word);
+                """)
+                conn.execute("""
+                    CREATE INDEX IF NOT EXISTS idx_freq_desc ON word_frequencies(frequency DESC, last_used DESC);
+                """)
+        except Exception as e:
+            print(f"[UserVocabularyDatabase] DB init error: {e}", file=sys.stderr)
+
+    def record_word(self, word: str, count: int = 1):
+        clean = word.strip().lower()
+        if len(clean) < 2 or not clean[0].isalpha():
+            return
+        now = time.time()
+        try:
+            with self._get_connection() as conn:
+                conn.execute("""
+                    INSERT INTO word_frequencies (word, frequency, last_used)
+                    VALUES (?, ?, ?)
+                    ON CONFLICT(word) DO UPDATE SET
+                        frequency = frequency + excluded.frequency,
+                        last_used = excluded.last_used;
+                """, (clean, count, now))
+        except Exception:
+            pass
+
+    def record_text(self, text: str):
+        if not text:
+            return
+        words = re.findall(r"\b[a-zA-Z_][a-zA-Z0-9_\-]{1,}\b", text)
+        if not words:
+            return
+        counts: Dict[str, int] = {}
+        for w in words:
+            cw = w.lower()
+            if len(cw) >= 2 and cw[0].isalpha():
+                counts[cw] = counts.get(cw, 0) + 1
+
+        now = time.time()
+        try:
+            with self._get_connection() as conn:
+                conn.executemany("""
+                    INSERT INTO word_frequencies (word, frequency, last_used)
+                    VALUES (?, ?, ?)
+                    ON CONFLICT(word) DO UPDATE SET
+                        frequency = frequency + excluded.frequency,
+                        last_used = excluded.last_used;
+                """, [(word, cnt, now) for word, cnt in counts.items()])
+        except Exception:
+            pass
+
+    def get_top_matches(self, prefix: str, limit: int = 10) -> List[Tuple[str, int]]:
+        p_low = prefix.strip().lower()
+        if len(p_low) < 2:
+            return []
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.execute("""
+                    SELECT word, frequency FROM word_frequencies
+                    WHERE word LIKE ? AND word != ?
+                    ORDER BY frequency DESC, last_used DESC, length(word) ASC
+                    LIMIT ?;
+                """, (f"{p_low}%", p_low, limit))
+                return cursor.fetchall()
+        except Exception:
+            return []
+
+    def get_total_words(self) -> int:
+        try:
+            with self._get_connection() as conn:
+                res = conn.execute("SELECT COUNT(*) FROM word_frequencies;").fetchone()
+                return res[0] if res else 0
+        except Exception:
+            return 0
+
+    def seed_from_directory(self, dir_path: Path):
+        """Seeds the database from existing text and markdown documents."""
+        if not dir_path.exists():
+            return
+        try:
+            for item in dir_path.glob("*.*"):
+                if item.is_file() and item.suffix.lower() in (".txt", ".md", ".py", ".json", ".sh"):
+                    try:
+                        content = item.read_text(encoding="utf-8", errors="ignore")
+                        self.record_text(content)
+                    except Exception:
+                        pass
+        except Exception:
+            pass
+
+
 class AutocompleteEngine:
     """
     Dual-layer autocomplete and spellcheck engine:
-    1. Fast prefix trie/set lookup for ble.sh style ghost-text completion.
-    2. Levenshtein fuzzy distance spellchecking & auto-correction for typos.
+    1. Fast prefix lookup prioritized by the user's persistent frequency SQLite database.
+    2. Document-local vocabulary & built-in keyword lookup.
+    3. Levenshtein fuzzy distance spellchecking & auto-correction for typos.
     """
     def __init__(self):
         self.vocabulary: Set[str] = set()
         self.doc_words: Set[str] = set()
+        self.vocab_db = UserVocabularyDatabase()
         self._load_builtins()
+        self._check_and_seed()
+
+    def _check_and_seed(self):
+        try:
+            if self.vocab_db.get_total_words() < 50:
+                self.vocab_db.seed_from_directory(DEFAULT_NOTES_DIR)
+        except Exception:
+            pass
 
     def _load_builtins(self):
         for word in COMMON_KEYWORDS:
@@ -156,14 +293,28 @@ class AutocompleteEngine:
     def get_suggestion(self, prefix: str) -> Optional[str]:
         """
         Returns the single best completion suffix matching the given prefix.
-        If no exact prefix match exists, checks for fuzzy autocorrect candidates.
+        Priority:
+        1. User's most frequent words from the persistent SQLite database.
+        2. Exact matches in current document words.
+        3. Built-in vocabulary & system keywords.
+        4. Fuzzy autocorrect candidates.
         """
         if not prefix or len(prefix) < 2:
             return None
 
         p_low = prefix.lower()
 
-        # Priority 1: Exact matches in current document words
+        # Priority 1: User's highest-frequency words from persistent SQLite database
+        db_matches = self.vocab_db.get_top_matches(p_low, limit=5)
+        if db_matches:
+            match, _ = db_matches[0]
+            if prefix.isupper():
+                match = match.upper()
+            elif prefix[0].isupper():
+                match = match.capitalize()
+            return match[len(prefix):]
+
+        # Priority 2: Exact matches in current document words
         candidates = [w for w in self.doc_words if w.startswith(p_low) and len(w) > len(p_low)]
         if candidates:
             candidates.sort(key=lambda w: (len(w), w))
@@ -174,7 +325,7 @@ class AutocompleteEngine:
                 match = match.capitalize()
             return match[len(prefix):]
 
-        # Priority 2: Built-in vocabulary & system keywords
+        # Priority 3: Built-in vocabulary & system keywords
         candidates = [w for w in self.vocabulary if w.startswith(p_low) and len(w) > len(p_low)]
         if candidates:
             candidates.sort(key=lambda w: (len(w), w))
@@ -185,7 +336,7 @@ class AutocompleteEngine:
                 match = match.capitalize()
             return match[len(prefix):]
 
-        # Priority 3: Fuzzy Autocorrect
+        # Priority 4: Fuzzy Autocorrect
         if len(prefix) >= 3:
             corr = self.get_autocorrect_suggestion(prefix)
             if corr and corr.lower().startswith(p_low):

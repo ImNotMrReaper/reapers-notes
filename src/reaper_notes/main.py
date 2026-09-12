@@ -543,11 +543,20 @@ class EditorPage(Gtk.Box):
             end_iter = cursor_iter.copy()
             end_iter.forward_chars(len(self.active_ghost_text))
 
+            # Extract the full word to record in the user frequency database
+            w_start = cursor_iter.copy()
+            w_start.backward_word_start()
+            prefix_text = self.buffer.get_text(w_start, cursor_iter, True)
+            full_word = (prefix_text + self.active_ghost_text).strip()
+
             self.buffer.remove_tag(self.ghost_tag, start_iter, end_iter)
             self.buffer.place_cursor(end_iter)
 
             self.active_ghost_text = ""
             self.window.lbl_suggestion.set_text("")
+
+            if full_word and hasattr(self.window, "engine") and hasattr(self.window.engine, "vocab_db"):
+                self.window.engine.vocab_db.record_word(full_word, count=3)
         finally:
             self._suppress_autocomplete = False
 
@@ -578,7 +587,7 @@ class EditorPage(Gtk.Box):
             GLib.source_remove(self._autosave_source_id)
             self._autosave_source_id = None
 
-        if get_setting("auto_save", True):
+        if get_setting("auto_save", False):
             self._autosave_source_id = GLib.timeout_add(2500, self._on_autosave_timer)
 
     def _on_autosave_timer(self):
@@ -1177,6 +1186,72 @@ class NotesWindow(Adw.ApplicationWindow):
 
         GLib.timeout_add(interval, on_step)
 
+    def _save_single_page(self, page: EditorPage) -> bool:
+        """Saves a page with an existing filepath, or returns False if untitled."""
+        if not page.filepath:
+            return False
+        clean_text = page.get_clean_text()
+        if page.is_locked:
+            ensure_page_locked_storage(page)
+        elif Path(page.filepath).parent.resolve() == LOCKED_NOTES_DIR.resolve():
+            ensure_page_unlocked_storage(page)
+
+        path = Path(page.filepath)
+        try:
+            if page.is_locked:
+                payload = encrypt_note(clean_text)
+                with open(path, "wb") as f:
+                    f.write(payload)
+            else:
+                with open(path, "w", encoding="utf-8") as f:
+                    f.write(clean_text)
+            page.is_modified = False
+            self.update_tab_title(page)
+            if hasattr(self, "engine") and hasattr(self.engine, "vocab_db"):
+                self.engine.vocab_db.record_text(clean_text)
+            return True
+        except Exception as e:
+            print(f"Error saving note {path}: {e}", file=sys.stderr)
+            return False
+
+    def _prompt_save_as_for_page(self, page: EditorPage, callback=None):
+        """Presents a file dialog to save an untitled note, then calls callback(success)."""
+        dialog = Gtk.FileDialog()
+        dialog.set_title("Save Document As...")
+        suggested_name = page.get_title().replace("• ", "").strip()
+        if page.is_locked and not suggested_name.endswith(".locked"):
+            suggested_name = f"{Path(suggested_name).stem}.locked"
+        dialog.set_initial_name(suggested_name)
+
+        initial_dir = LOCKED_NOTES_DIR if page.is_locked else DEFAULT_NOTES_DIR
+        initial_dir.mkdir(parents=True, exist_ok=True)
+        dialog.set_initial_folder(Gio.File.new_for_path(str(initial_dir)))
+
+        def on_response(d, result):
+            try:
+                gfile = d.save_finish(result)
+                if gfile:
+                    chosen_path = Path(gfile.get_path())
+                    if page.is_locked:
+                        LOCKED_NOTES_DIR.mkdir(parents=True, exist_ok=True)
+                        stem = chosen_path.stem if not chosen_path.name.endswith(".locked") else chosen_path.stem
+                        filename = f"{stem}.locked"
+                        target_path = LOCKED_NOTES_DIR / filename
+                        page.filepath = str(target_path)
+                    else:
+                        page.filepath = str(chosen_path)
+                    page._detect_and_set_language(page.filepath)
+                    saved = self._save_single_page(page)
+                    if callback:
+                        callback(saved)
+                    return
+            except Exception:
+                pass
+            if callback:
+                callback(False)
+
+        dialog.save(self, None, on_response)
+
     def _save_page_immediately(self, page: EditorPage) -> bool:
         """Saves a modified page immediately without blocking async modal stalls."""
         clean_text = page.get_clean_text()
@@ -1185,6 +1260,10 @@ class NotesWindow(Adw.ApplicationWindow):
             return True
 
         if not page.filepath:
+            # If auto_save is False, NEVER silently create untitled files in Notes folder!
+            if not get_setting("auto_save", False):
+                return False
+
             first_line = ""
             for line in clean_text.splitlines():
                 s = line.strip().lstrip("#").strip()
@@ -1222,6 +1301,8 @@ class NotesWindow(Adw.ApplicationWindow):
                     f.write(clean_text)
             page.is_modified = False
             self.update_tab_title(page)
+            if hasattr(self, "engine") and hasattr(self.engine, "vocab_db"):
+                self.engine.vocab_db.record_text(clean_text)
             return True
         except Exception as e:
             print(f"Error auto-saving note {path}: {e}", file=sys.stderr)
@@ -1239,14 +1320,16 @@ class NotesWindow(Adw.ApplicationWindow):
         if not modified_pages:
             return False
 
-        # If auto-save is enabled, automatically save all modified notes immediately and exit cleanly
-        if get_setting("auto_save", True):
-            for _, page in modified_pages:
-                self._save_page_immediately(page)
-            return False
+        # If auto-save is enabled and all modified notes have paths, save immediately and exit
+        if get_setting("auto_save", False):
+            untitled = [p for _, p in modified_pages if not p.filepath]
+            if not untitled:
+                for _, page in modified_pages:
+                    self._save_single_page(page)
+                return False
 
         if len(modified_pages) == 1:
-            title = modified_pages[0][1].get_title()
+            title = modified_pages[0][1].get_title().replace("• ", "").strip()
             heading = f'Save changes to "{title}" before closing?'
             body = "If you close without saving, your changes will be discarded."
         else:
@@ -1259,16 +1342,33 @@ class NotesWindow(Adw.ApplicationWindow):
             body=body,
         )
         dialog.add_response("cancel", "Cancel")
-        dialog.add_response("discard", "Discard All")
+        dialog.add_response("discard", "Discard All" if len(modified_pages) > 1 else "Discard")
         dialog.add_response("save", "Save All" if len(modified_pages) > 1 else "Save")
         dialog.set_response_appearance("discard", Adw.ResponseAppearance.DESTRUCTIVE)
         dialog.set_response_appearance("save", Adw.ResponseAppearance.SUGGESTED)
 
         def on_response(d, response):
             if response == "save":
-                for _, page in modified_pages:
-                    self._save_page_immediately(page)
-                self.destroy()
+                pages_queue = list(modified_pages)
+
+                def save_next():
+                    if not pages_queue:
+                        for _, p in modified_pages:
+                            p.is_modified = False
+                        self.destroy()
+                        return
+                    _, page = pages_queue.pop(0)
+                    if page.filepath:
+                        self._save_single_page(page)
+                        save_next()
+                    else:
+                        def on_saved(success):
+                            if success:
+                                save_next()
+                            # If canceled by user, keep window open
+                        self._prompt_save_as_for_page(page, on_saved)
+
+                save_next()
             elif response == "discard":
                 for _, page in modified_pages:
                     page.is_modified = False
@@ -1365,16 +1465,17 @@ class NotesWindow(Adw.ApplicationWindow):
     def _on_close_page_requested(self, tab_view, adw_page):
         page = adw_page.get_child()
         if page and page.is_modified and len(page.get_clean_text().strip()) > 0:
-            if get_setting("auto_save", True):
-                self._save_page_immediately(page)
+            if get_setting("auto_save", False) and page.filepath:
+                self._save_single_page(page)
                 tab_view.close_page_finish(adw_page, True)
                 if tab_view.get_n_pages() == 0:
                     self.open_new_tab()
                 return True
 
+            title = page.get_title().replace("• ", "").strip()
             dialog = Adw.MessageDialog(
                 transient_for=self,
-                heading=f'Save changes to "{page.get_title()}"?',
+                heading=f'Save changes to "{title}"?',
                 body="If you close without saving, your changes will be discarded."
             )
             dialog.add_response("cancel", "Cancel")
@@ -1385,11 +1486,25 @@ class NotesWindow(Adw.ApplicationWindow):
 
             def on_response(d, response):
                 if response == "save":
-                    self._save_page_immediately(page)
-                    tab_view.close_page_finish(adw_page, True)
+                    if page.filepath:
+                        self._save_single_page(page)
+                        tab_view.close_page_finish(adw_page, True)
+                        if tab_view.get_n_pages() == 0:
+                            self.open_new_tab()
+                    else:
+                        def on_saved(success):
+                            if success:
+                                tab_view.close_page_finish(adw_page, True)
+                                if tab_view.get_n_pages() == 0:
+                                    self.open_new_tab()
+                            else:
+                                tab_view.close_page_finish(adw_page, False)
+                        self._prompt_save_as_for_page(page, on_saved)
                 elif response == "discard":
                     page.is_modified = False
                     tab_view.close_page_finish(adw_page, True)
+                    if tab_view.get_n_pages() == 0:
+                        self.open_new_tab()
                 else:
                     tab_view.close_page_finish(adw_page, False)
 
@@ -1705,6 +1820,9 @@ class NotesWindow(Adw.ApplicationWindow):
             page.is_modified = False
             self.update_tab_title(page)
             self.set_status_message(f"✅ Saved: {path.name}")
+
+        if hasattr(self, "engine") and hasattr(self.engine, "vocab_db"):
+            self.engine.vocab_db.record_text(clean_text)
 
     def on_action_save_as(self):
         page = self.get_current_page()

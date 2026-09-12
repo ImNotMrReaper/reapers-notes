@@ -126,7 +126,17 @@ class WhisperEngine:
                 return ""
 
             try:
-                floats_arr = array.array('f', (s / 32768.0 for s in samples_int16))
+                # Dynamic Peak Normalization & Gain Optimization:
+                # Whisper operates optimally with audio normalized between -1.0 and 1.0 with peak ~0.88.
+                # When the user speaks louder or at varying distances, normalize cleanly without clipping.
+                max_abs = max((abs(s) for s in samples_int16), default=0)
+                if max_abs > 50:
+                    target_peak = 28835.0  # 0.88 * 32768.0
+                    gain = max(1.0, min(3.5, target_peak / float(max_abs)))
+                else:
+                    gain = 1.0
+
+                floats_arr = array.array('f', (max(-1.0, min(1.0, (s * gain) / 32768.0)) for s in samples_int16))
                 buf_addr, buf_len = floats_arr.buffer_info()
                 c_prompt = prompt.encode("utf-8") if prompt else b""
 
@@ -207,6 +217,13 @@ class VoiceDictationManager:
             self._stop_flag = False
             self.is_recording.set(True)
 
+            # Ensure system microphone capture volume is boosted to optimal level (90%)
+            try:
+                subprocess.run(["wpctl", "set-volume", "@DEFAULT_AUDIO_SOURCE@", "0.90"],
+                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=1)
+            except Exception:
+                pass
+
             cmd = ["pw-record", "--format=s16", "--rate=16000", "--channels=1", "-"]
             try:
                 self.proc = subprocess.Popen(
@@ -268,7 +285,7 @@ class VoiceDictationManager:
                     calibrated_chunks += 1
                     continue
 
-                threshold = max(200.0, ambient_rms * 1.35 + 100.0)
+                threshold = max(140.0, ambient_rms * 1.25 + 60.0)
 
                 if rms > threshold:
                     speech_detected_in_sentence = True
@@ -282,9 +299,9 @@ class VoiceDictationManager:
                 if speech_detected_in_sentence:
                     accumulated_sentence.extend(samples)
 
-                    # Condition A: Natural pause (silence >= 400ms after speech)
+                    # Condition A: Natural pause (silence >= 450ms after speech)
                     silence_duration_ms = silence_count * 100
-                    if silence_duration_ms >= 400 and len(accumulated_sentence) >= min_sentence_samples:
+                    if silence_duration_ms >= 450 and len(accumulated_sentence) >= min_sentence_samples:
                         text = self.engine.transcribe_samples(
                             accumulated_sentence,
                             prompt=""
