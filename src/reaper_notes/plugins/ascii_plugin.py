@@ -925,8 +925,12 @@ class AsciiArtPlugin(NotesPlugin):
                         matches = OnlineAsciiFetcher.search_all_sources(prompt)
                         def on_search_done():
                             if matches:
-                                window.set_status_message(f"🌐 Found {len(matches)} online artworks for '{prompt}'!")
-                                self.show_online_search_dialog(window, initial_query=prompt, preloaded_results=matches)
+                                best_art = matches[0]["art"]
+                                art_title = matches[0].get("title", prompt)
+                                safe_title = "".join(c for c in art_title if c.isalnum() or c in (" ", "-", "_")).strip() or "ASCII_Art"
+                                doc_name = f"{safe_title}_Art.txt"
+                                self._insert_and_rename(window, best_art, doc_name)
+                                window.set_status_message(f"🎨 Researched & rendered ASCII artwork: '{art_title}'!")
                             else:
                                 window.set_status_message(f"🎨 No online matches found for '{prompt}'. Synthesizing via AI...")
                                 if hasattr(window, "trigger_action_progress"):

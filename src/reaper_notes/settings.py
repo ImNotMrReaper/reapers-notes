@@ -16,6 +16,7 @@ DEFAULT_SETTINGS = {
     "word_wrap": True,
     "right_margin": False,
     "default_language": "markdown",
+    "auto_save": True,
     "active_vault_path": None,
     "custom_vaults": []
 }

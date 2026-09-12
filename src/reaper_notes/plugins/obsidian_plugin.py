@@ -71,7 +71,7 @@ class ObsidianPlugin(NotesPlugin):
             window.set_status_message("⚠️ No active note to push.")
             return
 
-        content = page.get_full_text()
+        content = page.get_clean_text() if hasattr(page, "get_clean_text") else page.get_full_text()
         raw_title = page.get_title() if hasattr(page, "get_title") else getattr(page, "title", "")
         title = "" if "Untitled" in str(raw_title) else str(raw_title)
         if not content.strip():
@@ -88,6 +88,10 @@ class ObsidianPlugin(NotesPlugin):
         vault_name, vault_path = default_vault
         success, res = push_to_obsidian(content, title, vault_path)
         if success:
+            page.filepath = res
+            page.is_modified = False
+            if hasattr(window, "update_tab_title"):
+                window.update_tab_title(page)
             window.set_status_message(f"🟣 Note pushed to Obsidian: {vault_name}/{os.path.basename(res)}")
         else:
             window.set_status_message(f"❌ Failed to push note: {res}")

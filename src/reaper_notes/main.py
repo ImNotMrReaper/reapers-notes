@@ -58,6 +58,7 @@ class EditorPage(Gtk.Box):
         self.font_size_pt = DEFAULT_FONT_SIZE
         self.voice_sentence_mark = None
         self.voice_pending_len = 0
+        self._autosave_source_id = None
 
         self.lm = GtkSource.LanguageManager.get_default()
         self.sm = GtkSource.StyleSchemeManager.get_default()
@@ -314,6 +315,7 @@ class EditorPage(Gtk.Box):
         self.is_modified = True
         self.window.update_tab_title(self)
         self.window.update_status_bar()
+        self._schedule_autosave()
 
         if self._suppress_autocomplete:
             return
@@ -429,6 +431,28 @@ class EditorPage(Gtk.Box):
             return before + after
 
         return full_text
+
+    def get_full_text(self) -> str:
+        """Returns clean text buffer without active ghost suggestions."""
+        return self.get_clean_text()
+
+    def _schedule_autosave(self):
+        """Debounces and schedules an automatic background save."""
+        if hasattr(self, "_autosave_source_id") and self._autosave_source_id:
+            GLib.source_remove(self._autosave_source_id)
+            self._autosave_source_id = None
+
+        if get_setting("auto_save", True):
+            self._autosave_source_id = GLib.timeout_add(2500, self._on_autosave_timer)
+
+    def _on_autosave_timer(self):
+        self._autosave_source_id = None
+        if self.is_modified and len(self.get_clean_text().strip()) > 0:
+            if hasattr(self.window, "_save_page_immediately"):
+                saved = self.window._save_page_immediately(self)
+                if saved:
+                    self.window.set_status_message(f"💾 Auto-saved: {self.get_title()}")
+        return False
 
     @property
     def title(self) -> str:
@@ -835,7 +859,7 @@ class NotesWindow(Adw.ApplicationWindow):
         self.btn_ascii = Gtk.Button.new_from_icon_name("applications-graphics-symbolic")
         self.btn_ascii.set_tooltip_text("ASCII Art Archives & AI Synthesis (Ctrl+Shift+I / Ctrl+Alt+I)")
         self.btn_ascii.add_css_class("header-action-btn")
-        self.btn_ascii.connect("clicked", lambda _: self.trigger_ascii_art_search())
+        self.btn_ascii.connect("clicked", lambda _: self.trigger_ascii_art())
         right_box.append(self.btn_ascii)
 
         self.btn_obsidian = Gtk.Button.new_from_icon_name("document-send-symbolic")
@@ -1066,6 +1090,12 @@ class NotesWindow(Adw.ApplicationWindow):
         if not modified_pages:
             return False
 
+        # If auto-save is enabled, automatically save all modified notes immediately and exit cleanly
+        if get_setting("auto_save", True):
+            for _, page in modified_pages:
+                self._save_page_immediately(page)
+            return False
+
         if len(modified_pages) == 1:
             title = modified_pages[0][1].get_title()
             heading = f'Save changes to "{title}" before closing?'
@@ -1182,6 +1212,13 @@ class NotesWindow(Adw.ApplicationWindow):
     def _on_close_page_requested(self, tab_view, adw_page):
         page = adw_page.get_child()
         if page and page.is_modified and len(page.get_clean_text().strip()) > 0:
+            if get_setting("auto_save", True):
+                self._save_page_immediately(page)
+                tab_view.close_page_finish(adw_page, True)
+                if tab_view.get_n_pages() == 0:
+                    self.open_new_tab()
+                return True
+
             dialog = Adw.MessageDialog(
                 transient_for=self,
                 heading=f'Save changes to "{page.get_title()}"?',
@@ -1768,7 +1805,7 @@ class NotesWindow(Adw.ApplicationWindow):
             if not page:
                 self.set_status_message("⚠️ No active note to push.")
                 return
-            content = page.get_full_text()
+            content = page.get_clean_text()
             if not content.strip():
                 self.set_status_message("⚠️ Note is empty.")
                 return
@@ -1779,6 +1816,9 @@ class NotesWindow(Adw.ApplicationWindow):
                 vault_name, vault_path = default_vault
                 success, res = push_to_obsidian(content, title, vault_path)
                 if success:
+                    page.filepath = res
+                    page.is_modified = False
+                    self.update_tab_title(page)
                     self.set_status_message(f"🟣 Pushed to Obsidian vault '{vault_name}': {Path(res).name}")
                 else:
                     self.set_status_message(f"❌ Failed to push note: {res}")

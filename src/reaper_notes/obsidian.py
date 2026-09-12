@@ -5,6 +5,7 @@ Provides automatic discovery of vaults created by Obsidian, directory scanning f
 """
 
 import os
+import sys
 import json
 import urllib.parse
 import subprocess
@@ -280,13 +281,16 @@ def push_to_obsidian(content: str, title: str = "", vault_path: str = None) -> t
             pass
 
     clean_title = title.strip()
-    if not clean_title or clean_title == "Untitled Note":
+    if clean_title.endswith(".txt") or clean_title.endswith(".md"):
+        clean_title = Path(clean_title).stem
+
+    if not clean_title or "Untitled" in clean_title:
         for line in content.splitlines():
             line_s = line.strip()
             if line_s.startswith("# "):
                 clean_title = line_s[2:].strip()
                 break
-        if not clean_title or clean_title == "Untitled Note":
+        if not clean_title or "Untitled" in clean_title:
             clean_title = f"Note_{datetime.now().strftime('%Y-%m-%d_%H%M%S')}"
 
     safe_title = "".join(c for c in clean_title if c.isalnum() or c in (" ", "-", "_")).strip()
@@ -299,10 +303,11 @@ def push_to_obsidian(content: str, title: str = "", vault_path: str = None) -> t
         content = frontmatter + "\n" + content
 
     target_file = vault_dir / f"{safe_title}.md"
-    counter = 1
-    while target_file.exists():
-        target_file = vault_dir / f"{safe_title} ({counter}).md"
-        counter += 1
+    if safe_title.startswith("Note_") or "Untitled" in title:
+        counter = 1
+        while target_file.exists():
+            target_file = vault_dir / f"{safe_title} ({counter}).md"
+            counter += 1
 
     try:
         with open(target_file, "w", encoding="utf-8") as f:
@@ -311,11 +316,9 @@ def push_to_obsidian(content: str, title: str = "", vault_path: str = None) -> t
         return False, f"Error saving note: {e}"
 
     try:
-        vault_name = vault_dir.name
-        rel_path = target_file.name
-        encoded_vault = urllib.parse.quote(vault_name)
-        encoded_file = urllib.parse.quote(rel_path)
-        uri = f"obsidian://open?vault={encoded_vault}&file={encoded_file}"
+        # Use absolute path for robust resolution across all Obsidian packaging variants
+        encoded_path = urllib.parse.quote(str(target_file.resolve()))
+        uri = f"obsidian://open?path={encoded_path}"
         
         # Launch Obsidian via installed binary or URI
         if os.path.exists("/snap/bin/obsidian"):

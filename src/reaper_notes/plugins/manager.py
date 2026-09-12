@@ -55,9 +55,10 @@ class PluginManager:
 
     def _discover_user_plugins(self):
         """Scans ~/.config/reaper-notes/plugins for external Python plugin files."""
+        builtin_module_names = {"base", "manager", "obsidian_plugin", "ai_plugin", "ascii_plugin", "example_plugin"}
         for py_path in glob.glob(str(self.user_plugins_dir / "*.py")):
             mod_name = Path(py_path).stem
-            if mod_name.startswith("__"):
+            if mod_name.startswith("__") or mod_name in builtin_module_names:
                 continue
             try:
                 spec = importlib.util.spec_from_file_location(f"user_plugin_{mod_name}", py_path)
