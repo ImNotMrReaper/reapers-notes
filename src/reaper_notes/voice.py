@@ -26,8 +26,8 @@ WHISPER_LIB_PATHS = [
 ]
 
 WHISPER_MODELS = [
-    Path.home() / ".local/share/whisper.cpp/models/ggml-tiny.en.bin",
-    Path.home() / ".local/share/whisper.cpp/models/ggml-base.en.bin"
+    Path.home() / ".local/share/whisper.cpp/models/ggml-base.en.bin",
+    Path.home() / ".local/share/whisper.cpp/models/ggml-tiny.en.bin"
 ]
 
 WHISPER_BIN = Path.home() / ".local/share/whisper.cpp/build/bin/whisper-cli"
@@ -257,7 +257,7 @@ class VoiceDictationManager:
                     calibrated_chunks += 1
                     continue
 
-                threshold = max(450.0, ambient_rms * 1.8 + 250.0)
+                threshold = max(220.0, ambient_rms * 1.4 + 120.0)
 
                 if rms > threshold:
                     speech_detected_in_sentence = True
@@ -271,9 +271,9 @@ class VoiceDictationManager:
                 if speech_detected_in_sentence:
                     accumulated_sentence.extend(samples)
 
-                    # Condition A: Natural pause (silence >= 400ms after speech)
+                    # Condition A: Natural pause (silence >= 600ms after speech)
                     silence_duration_ms = silence_count * 100
-                    if silence_duration_ms >= 400 and len(accumulated_sentence) >= min_sentence_samples:
+                    if silence_duration_ms >= 600 and len(accumulated_sentence) >= min_sentence_samples:
                         text = self.engine.transcribe_samples(
                             accumulated_sentence,
                             prompt=last_context_prompt

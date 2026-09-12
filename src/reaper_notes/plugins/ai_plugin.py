@@ -141,7 +141,14 @@ class AIAssistantPlugin(NotesPlugin):
         print(f"Current File: {file_title}", flush=True)
         print(f"Prompt: {prompt}\n", flush=True)
 
-        contextual_prompt = f"[Current File: {file_title}]\n{prompt}"
+        contextual_prompt = (
+            f"[Active Document: {file_title}]\n"
+            f"You are the AI assistant inside Reaper's Notes editor.\n"
+            f"Task: Directly generate content for the active note based on the user's prompt. "
+            f"If the prompt asks for a story, summary, or creative text, weave in the active document name '{file_title}' naturally. "
+            f"Provide clean, document-ready text to insert into the editor without conversational filler.\n\n"
+            f"{prompt}"
+        )
 
         def worker():
             if not prompt or not prompt.strip():
@@ -172,9 +179,15 @@ class AIAssistantPlugin(NotesPlugin):
     def _call_antigravity(self, prompt: str) -> str:
         if not shutil.which("agy"):
             return "[Error]: Antigravity CLI ('agy') not found in PATH. Please install or switch provider."
-        cmd = ["agy", "-p", prompt.strip(), "--output-format", "text"]
+        # Use -c (--continue) to avoid creating a new chat session every time
+        cmd = ["agy", "-c", "-p", prompt.strip(), "--output-format", "text"]
         res = subprocess.run(cmd, capture_output=True, text=True, timeout=90)
         output = res.stdout.strip()
+        if not output and res.returncode != 0:
+            # Fallback to fresh session if no previous conversation can be continued
+            cmd_fallback = ["agy", "-p", prompt.strip(), "--output-format", "text"]
+            res = subprocess.run(cmd_fallback, capture_output=True, text=True, timeout=90)
+            output = res.stdout.strip()
         if not output and res.stderr:
             return f"[Antigravity Error]: {res.stderr.strip()}"
         return output
