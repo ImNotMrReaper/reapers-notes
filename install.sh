@@ -7,7 +7,27 @@
 
 set -e
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd)"
+
+# Auto-clone repository if executed directly from curl/pipe
+if [ ! -d "${SCRIPT_DIR}/src/reaper_notes" ]; then
+    echo ">>> Running from remote pipe. Cloning latest repository..."
+    TMP_CLONE="$(mktemp -d /tmp/reapers-notes-install.XXXXXX)"
+    if ! command -v git >/dev/null 2>&1; then
+        if command -v apt-get >/dev/null 2>&1; then
+            if [ "$(id -u)" -eq 0 ]; then apt-get update -qq && apt-get install -y -qq git; else sudo apt-get update -qq && sudo apt-get install -y -qq git; fi
+        elif command -v dnf >/dev/null 2>&1; then
+            if [ "$(id -u)" -eq 0 ]; then dnf install -y git; else sudo dnf install -y git; fi
+        elif command -v pacman >/dev/null 2>&1; then
+            if [ "$(id -u)" -eq 0 ]; then pacman -Sy --needed --noconfirm git; else sudo pacman -Sy --needed --noconfirm git; fi
+        elif command -v zypper >/dev/null 2>&1; then
+            if [ "$(id -u)" -eq 0 ]; then zypper --non-interactive install git; else sudo zypper --non-interactive install git; fi
+        fi
+    fi
+    git clone --depth 1 https://github.com/ImNotMrReaper/reapers-notes.git "${TMP_CLONE}"
+    SCRIPT_DIR="${TMP_CLONE}"
+    trap "rm -rf '${TMP_CLONE}'" EXIT
+fi
 
 echo "======================================================================"
 echo "          Installing Reaper's Notes (Modern Text Editor)             "
@@ -32,7 +52,7 @@ else
     echo ">>> Target Scope: Local User (${INSTALL_PREFIX})"
 fi
 
-# 1. Install System Dependencies if apt is available and packages missing
+# 1. Install System Dependencies across Linux Distributions
 if command -v apt-get >/dev/null 2>&1; then
     MISSING_DEPS=0
     for pkg in python3-gi python3-gi-cairo gir1.2-gtk-4.0 gir1.2-adw-1 gir1.2-gtksource-5 python3-cryptography; do
@@ -55,6 +75,30 @@ if command -v apt-get >/dev/null 2>&1; then
         fi
     else
         echo ">>> All required GTK4, Libadwaita, and system dependencies are already installed."
+    fi
+elif command -v dnf >/dev/null 2>&1; then
+    echo ">>> Installing dependencies (DNF / Fedora)..."
+    FEDORA_DEPS="python3-gobject gtk4 libadwaita gtksourceview5 python3-cryptography zenity"
+    if [ "$IS_SYSTEM" -eq 1 ]; then
+        dnf install -y $FEDORA_DEPS || true
+    elif command -v sudo >/dev/null 2>&1; then
+        sudo dnf install -y $FEDORA_DEPS || true
+    fi
+elif command -v pacman >/dev/null 2>&1; then
+    echo ">>> Installing dependencies (Pacman / Arch)..."
+    ARCH_DEPS="python-gobject gtk4 libadwaita gtksourceview5 python-cryptography zenity"
+    if [ "$IS_SYSTEM" -eq 1 ]; then
+        pacman -Sy --needed --noconfirm $ARCH_DEPS || true
+    elif command -v sudo >/dev/null 2>&1; then
+        sudo pacman -Sy --needed --noconfirm $ARCH_DEPS || true
+    fi
+elif command -v zypper >/dev/null 2>&1; then
+    echo ">>> Installing dependencies (Zypper / openSUSE)..."
+    ZYPPER_DEPS="python3-gobject gtk4 libadwaita-1-0 libgtksourceview-5-0 python3-cryptography zenity"
+    if [ "$IS_SYSTEM" -eq 1 ]; then
+        zypper --non-interactive install $ZYPPER_DEPS || true
+    elif command -v sudo >/dev/null 2>&1; then
+        sudo zypper --non-interactive install $ZYPPER_DEPS || true
     fi
 fi
 
