@@ -1,14 +1,68 @@
+# ==============================================================================
+# Sensitive Personal Data, Private Notes & Audio Dictations
+# ==============================================================================
+
+# User Databases, Personal Notes & Private Documents
+*.db
+*.sqlite
+*.sqlite3
+notes/
+my_notes/
+private/
+personal/
+notebooks/private/
+
+# Voice Dictation Audio Recordings & Caches
+*.wav
+*.mp3
+*.ogg
+*.flac
+*.m4a
+dictation_cache/
+audio_cache/
+
+# Environment Variables, Secrets & API Tokens
+.env
+.env.*
+*.env
+*.secret
+*.secrets
+secrets/
+*credential*
+token.json
+tokens/
+*.token
+*.key
+*.pem
+
+# Python Artifacts & Caches
 __pycache__/
-*.pyc
-*.pyo
-*.pyd
+*.py[cod]
+*$py.class
+*.swp
+*.swo
+*.bak*
+*~
 .pytest_cache/
+.venv/
+venv/
+
+# Build Packages & Installers
 build/
 dist/
 *.egg-info/
+*.deb
+
+# Logs & Temporary Files
+*.log
+logs/
+scratch/
+tmp/
+temp/
+
+# IDE, Editor & OS Artifacts
 .idea/
 .vscode/
-*.swp
-*~
-*.deb
+.DS_Store
+Thumbs.db
 .agy_link/
